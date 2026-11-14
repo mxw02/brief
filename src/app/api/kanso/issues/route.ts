@@ -148,3 +148,105 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({ kansoUrl, issues });
 }
+
+export async function POST(request: NextRequest) {
+  const kansoUrl = getKansoBaseUrl();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const token = process.env.KANSO_API_TOKEN?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let body: {
+    projectId?: string;
+    title?: string;
+    description?: string;
+    priority?: string;
+    type?: string;
+    docId?: string;
+    docTitle?: string;
+    sourceUrl?: string;
+  };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const projectId = body.projectId?.trim();
+  const title = body.title?.trim();
+  if (!projectId || !title) {
+    return NextResponse.json(
+      { error: "projectId and title are required" },
+      { status: 400 }
+    );
+  }
+
+  const docTitle = body.docTitle?.trim() || "Brief Document";
+  const docId = body.docId?.trim() || "";
+  const sourceUrl =
+    body.sourceUrl?.trim() ||
+    (process.env.APP_URL?.trim().replace(/\/+$/, "") || "http://localhost:3000") +
+      (docId ? `/?doc=${encodeURIComponent(docId)}` : "");
+
+  const baseDescription = body.description?.trim() || title;
+  const descriptionWithBacklink = `${baseDescription}\n\n---\nQuelle in Brief: [${docTitle}](${sourceUrl})`;
+
+  try {
+    const res = await fetch(`${kansoUrl}/api/issues`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        projectId,
+        title,
+        description: descriptionWithBacklink,
+        status: "TODO",
+        priority: body.priority || "MEDIUM",
+        type: body.type || "TASK",
+        externalSource: "brief",
+        externalKey: docId || null,
+        externalUrl: sourceUrl,
+      }),
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return NextResponse.json(
+        { error: errText || `Kanso returned ${res.status}` },
+        { status: res.status }
+      );
+    }
+
+    const created = (await res.json()) as {
+      identifier?: string;
+      title?: string;
+      status?: string;
+      priority?: string;
+      assigneeName?: string | null;
+      assigneeType?: string | null;
+    };
+
+    const identifier = (created.identifier || "").toUpperCase();
+    const projectKey = identifier.split("-")[0] || "KANSO";
+    const issue: KansoIssueSummary = {
+      identifier,
+      title: created.title || title,
+      status: created.status || "TODO",
+      priority: created.priority || body.priority || "MEDIUM",
+      assigneeName: created.assigneeName ?? null,
+      assigneeType: created.assigneeType ?? null,
+      url: `${kansoUrl}/projects/${projectKey}/issues/${identifier}`,
+      found: true,
+    };
+
+    return NextResponse.json({ kansoUrl, issue }, { status: 201 });
+  } catch {
+    return NextResponse.json(
+      { error: "Kanso ist nicht erreichbar" },
+      { status: 502 }
+    );
+  }
+}
