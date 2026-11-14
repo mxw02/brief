@@ -740,8 +740,8 @@ export function BriefEditor() {
           />
         )}
 
-        <main className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-8">
-          <article className="mx-auto flex w-full max-w-4xl flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
+        <main className="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <article className="flex w-full flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
             {activeDoc?.status === "draft" &&
               Boolean(
                 activeDoc.proposedBy ||
