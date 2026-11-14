@@ -4,10 +4,16 @@ export interface Space {
   slug: string;
 }
 
-export type DocumentStatus = "draft" | "in_review" | "approved" | "outdated";
+export type DocumentStatus =
+  | "draft"
+  | "ready_for_review"
+  | "in_review"
+  | "approved"
+  | "outdated";
 
 export const SPEC_STATUSES: DocumentStatus[] = [
   "draft",
+  "ready_for_review",
   "in_review",
   "approved",
   "outdated",
@@ -22,6 +28,12 @@ export const SPEC_STATUS_META: Record<
     shortLabel: "Draft",
     badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
     dotClass: "bg-amber-500",
+  },
+  ready_for_review: {
+    label: "Ready for Review",
+    shortLabel: "Ready",
+    badgeClass: "border-violet-200 bg-violet-50 text-violet-800",
+    dotClass: "bg-violet-500",
   },
   in_review: {
     label: "In Review",
@@ -47,6 +59,7 @@ export function normalizeDocumentStatus(
   status?: string | null
 ): DocumentStatus {
   if (status === "draft") return "draft";
+  if (status === "ready_for_review") return "ready_for_review";
   if (status === "in_review") return "in_review";
   if (status === "outdated") return "outdated";
   return "approved";
