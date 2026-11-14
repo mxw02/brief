@@ -5,9 +5,12 @@ import {
   DEFAULT_DOCUMENTS,
   DEFAULT_SPACES,
   normalizeDocumentStatus,
+  type AuthorType,
   type BriefDocument,
   type InlineComment,
+  type PublicUser,
   type Space,
+  type UserRole,
 } from "./workspace";
 
 export type DatabaseDriver = "sqlite" | "postgres";
@@ -94,6 +97,27 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   created_at TEXT NOT NULL,
   last_used_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'editor',
+  all_spaces INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_space_access (
+  user_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, space_id)
+);
+
+CREATE TABLE IF NOT EXISTS workspace_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 let sqliteInstance: SqliteDatabase | null = null;
@@ -164,6 +188,12 @@ async function ensureInitialized(): Promise<void> {
       await pool.query(
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS comments_json TEXT"
       );
+      await pool.query(
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_edited_by TEXT"
+      );
+      await pool.query(
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS last_edited_by_type TEXT"
+      );
       const res = await pool.query<{ count: string }>(
         "SELECT COUNT(*)::text AS count FROM spaces"
       );
@@ -214,6 +244,12 @@ async function ensureInitialized(): Promise<void> {
     const cols = db.prepare("PRAGMA table_info(documents)").all();
     if (!cols.some((c) => c.name === "comments_json")) {
       db.exec("ALTER TABLE documents ADD COLUMN comments_json TEXT;");
+    }
+    if (!cols.some((c) => c.name === "last_edited_by")) {
+      db.exec("ALTER TABLE documents ADD COLUMN last_edited_by TEXT;");
+    }
+    if (!cols.some((c) => c.name === "last_edited_by_type")) {
+      db.exec("ALTER TABLE documents ADD COLUMN last_edited_by_type TEXT;");
     }
     const row = db.prepare("SELECT COUNT(*) AS count FROM spaces").get();
     if (Number(row?.count ?? 0) === 0) {
@@ -286,6 +322,10 @@ function parseCommentsJson(raw: unknown): InlineComment[] | undefined {
 
 function mapDocRow(row: Record<string, unknown>): BriefDocument {
   const comments = parseCommentsJson(row.comments_json);
+  const editedType =
+    row.last_edited_by_type === "agent" || row.last_edited_by_type === "human"
+      ? (row.last_edited_by_type as AuthorType)
+      : undefined;
   return {
     id: String(row.id),
     spaceId: String(row.space_id),
@@ -301,6 +341,10 @@ function mapDocRow(row: Record<string, unknown>): BriefDocument {
     ...(row.proposal_summary
       ? { proposalSummary: String(row.proposal_summary) }
       : {}),
+    ...(row.last_edited_by
+      ? { lastEditedBy: String(row.last_edited_by) }
+      : {}),
+    ...(editedType ? { lastEditedByType: editedType } : {}),
     ...(comments ? { comments } : {}),
   };
 }
@@ -332,7 +376,7 @@ export async function dbReadWorkspace(): Promise<{
     const [spacesRes, docsRes] = await Promise.all([
       pool.query<Record<string, unknown>>("SELECT id, name, slug FROM spaces"),
       pool.query<Record<string, unknown>>(
-        "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json FROM documents"
+        "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
       ),
     ]);
     return {
@@ -356,7 +400,7 @@ export async function dbReadWorkspace(): Promise<{
     }));
   const documents = db
     .prepare(
-      "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json FROM documents"
+      "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
     )
     .all()
     .map(mapDocRow);
@@ -385,8 +429,8 @@ export async function dbWriteWorkspace(
       }
       for (const d of documents) {
         await client.query(
-          `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [
             d.id,
             d.spaceId,
@@ -398,6 +442,8 @@ export async function dbWriteWorkspace(
             d.proposedBy ?? null,
             d.proposalTargetId ?? null,
             d.proposalSummary ?? null,
+            d.lastEditedBy ?? null,
+            d.lastEditedByType ?? null,
             d.comments?.length ? JSON.stringify(d.comments) : null,
           ]
         );
@@ -424,8 +470,8 @@ export async function dbWriteWorkspace(
       insertSpace.run(s.id, s.name, s.slug);
     }
     const insertDoc = db.prepare(
-      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const d of documents) {
       insertDoc.run(
@@ -439,6 +485,8 @@ export async function dbWriteWorkspace(
         d.proposedBy ?? null,
         d.proposalTargetId ?? null,
         d.proposalSummary ?? null,
+        d.lastEditedBy ?? null,
+        d.lastEditedByType ?? null,
         d.comments?.length ? JSON.stringify(d.comments) : null
       );
     }
@@ -468,8 +516,8 @@ export async function dbInsertDocument(doc: BriefDocument): Promise<void> {
   await ensureInitialized();
   if (getDatabaseDriver() === "postgres") {
     await getPgPool().query(
-      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         doc.id,
         doc.spaceId,
@@ -477,18 +525,20 @@ export async function dbInsertDocument(doc: BriefDocument): Promise<void> {
         doc.title,
         doc.content,
         doc.updatedAt,
-        doc.status ?? "published",
+        doc.status ?? "approved",
         doc.proposedBy ?? null,
         doc.proposalTargetId ?? null,
         doc.proposalSummary ?? null,
+        doc.lastEditedBy ?? null,
+        doc.lastEditedByType ?? null,
       ]
     );
     return;
   }
   const db = await getSqlite();
   db.prepare(
-    `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     doc.id,
     doc.spaceId,
@@ -496,10 +546,12 @@ export async function dbInsertDocument(doc: BriefDocument): Promise<void> {
     doc.title,
     doc.content,
     doc.updatedAt,
-    doc.status ?? "published",
+    doc.status ?? "approved",
     doc.proposedBy ?? null,
     doc.proposalTargetId ?? null,
-    doc.proposalSummary ?? null
+    doc.proposalSummary ?? null,
+    doc.lastEditedBy ?? null,
+    doc.lastEditedByType ?? null
   );
 }
 
@@ -597,4 +649,400 @@ export async function dbFindAndTouchToken(
     String(row.id)
   );
   return String(row.name);
+}
+
+function normalizeUserRole(role: unknown): UserRole {
+  if (role === "admin" || role === "editor" || role === "viewer" || role === "agent_bot") {
+    return role;
+  }
+  return "viewer";
+}
+
+export async function dbCountUsers(): Promise<number> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    const res = await getPgPool().query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM users"
+    );
+    return Number(res.rows[0]?.count || "0");
+  }
+  const db = await getSqlite();
+  const row = db.prepare("SELECT COUNT(*) AS count FROM users").get();
+  return Number(row?.count ?? 0);
+}
+
+export async function dbListUsers(): Promise<PublicUser[]> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    const pool = getPgPool();
+    const [usersRes, accessRes] = await Promise.all([
+      pool.query<Record<string, unknown>>(
+        "SELECT id, name, email, role, all_spaces, created_at FROM users ORDER BY created_at ASC"
+      ),
+      pool.query<Record<string, unknown>>(
+        "SELECT user_id, space_id FROM user_space_access"
+      ),
+    ]);
+    const accessMap = new Map<string, string[]>();
+    for (const r of accessRes.rows) {
+      const uid = String(r.user_id);
+      const list = accessMap.get(uid) ?? [];
+      list.push(String(r.space_id));
+      accessMap.set(uid, list);
+    }
+    return usersRes.rows.map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      email: String(r.email),
+      role: normalizeUserRole(r.role),
+      allSpaces: Number(r.all_spaces) === 1,
+      spaceIds: accessMap.get(String(r.id)) ?? [],
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  const db = await getSqlite();
+  const userRows = db
+    .prepare(
+      "SELECT id, name, email, role, all_spaces, created_at FROM users ORDER BY created_at ASC"
+    )
+    .all();
+  const accessRows = db
+    .prepare("SELECT user_id, space_id FROM user_space_access")
+    .all();
+  const accessMap = new Map<string, string[]>();
+  for (const r of accessRows) {
+    const uid = String(r.user_id);
+    const list = accessMap.get(uid) ?? [];
+    list.push(String(r.space_id));
+    accessMap.set(uid, list);
+  }
+  return userRows.map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    email: String(r.email),
+    role: normalizeUserRole(r.role),
+    allSpaces: Number(r.all_spaces) === 1,
+    spaceIds: accessMap.get(String(r.id)) ?? [],
+    createdAt: String(r.created_at),
+  }));
+}
+
+export async function dbFindUserByEmail(
+  email: string
+): Promise<(PublicUser & { passwordHash: string }) | null> {
+  await ensureInitialized();
+  const normalized = email.trim().toLowerCase();
+  if (getDatabaseDriver() === "postgres") {
+    const pool = getPgPool();
+    const res = await pool.query<Record<string, unknown>>(
+      "SELECT id, name, email, password_hash, role, all_spaces, created_at FROM users WHERE email = $1",
+      [normalized]
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    const accessRes = await pool.query<Record<string, unknown>>(
+      "SELECT space_id FROM user_space_access WHERE user_id = $1",
+      [String(row.id)]
+    );
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      email: String(row.email),
+      passwordHash: String(row.password_hash),
+      role: normalizeUserRole(row.role),
+      allSpaces: Number(row.all_spaces) === 1,
+      spaceIds: accessRes.rows.map((r) => String(r.space_id)),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  const db = await getSqlite();
+  const row = db
+    .prepare(
+      "SELECT id, name, email, password_hash, role, all_spaces, created_at FROM users WHERE email = ?"
+    )
+    .get(normalized);
+  if (!row) return null;
+  const accessRows = db
+    .prepare("SELECT space_id FROM user_space_access WHERE user_id = ?")
+    .all(String(row.id));
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    passwordHash: String(row.password_hash),
+    role: normalizeUserRole(row.role),
+    allSpaces: Number(row.all_spaces) === 1,
+    spaceIds: accessRows.map((r) => String(r.space_id)),
+    createdAt: String(row.created_at),
+  };
+}
+
+export async function dbFindUserById(id: string): Promise<PublicUser | null> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    const pool = getPgPool();
+    const res = await pool.query<Record<string, unknown>>(
+      "SELECT id, name, email, role, all_spaces, created_at FROM users WHERE id = $1",
+      [id]
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    const accessRes = await pool.query<Record<string, unknown>>(
+      "SELECT space_id FROM user_space_access WHERE user_id = $1",
+      [id]
+    );
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      email: String(row.email),
+      role: normalizeUserRole(row.role),
+      allSpaces: Number(row.all_spaces) === 1,
+      spaceIds: accessRes.rows.map((r) => String(r.space_id)),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  const db = await getSqlite();
+  const row = db
+    .prepare(
+      "SELECT id, name, email, role, all_spaces, created_at FROM users WHERE id = ?"
+    )
+    .get(id);
+  if (!row) return null;
+  const accessRows = db
+    .prepare("SELECT space_id FROM user_space_access WHERE user_id = ?")
+    .all(id);
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    role: normalizeUserRole(row.role),
+    allSpaces: Number(row.all_spaces) === 1,
+    spaceIds: accessRows.map((r) => String(r.space_id)),
+    createdAt: String(row.created_at),
+  };
+}
+
+export async function dbCreateUser(input: {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  role: UserRole;
+  allSpaces: boolean;
+  spaceIds: string[];
+}): Promise<PublicUser> {
+  await ensureInitialized();
+  const now = new Date().toISOString();
+  const email = input.email.trim().toLowerCase();
+  const uniqueSpaces = Array.from(new Set(input.spaceIds));
+
+  if (getDatabaseDriver() === "postgres") {
+    const client = await getPgPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO users (id, name, email, password_hash, role, all_spaces, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          input.id,
+          input.name.trim(),
+          email,
+          input.passwordHash,
+          input.role,
+          input.allSpaces ? 1 : 0,
+          now,
+        ]
+      );
+      for (const sid of uniqueSpaces) {
+        await client.query(
+          "INSERT INTO user_space_access (user_id, space_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [input.id, sid]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    const db = await getSqlite();
+    db.exec("BEGIN");
+    try {
+      db.prepare(
+        `INSERT INTO users (id, name, email, password_hash, role, all_spaces, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        input.id,
+        input.name.trim(),
+        email,
+        input.passwordHash,
+        input.role,
+        input.allSpaces ? 1 : 0,
+        now
+      );
+      const insertAccess = db.prepare(
+        "INSERT OR IGNORE INTO user_space_access (user_id, space_id) VALUES (?, ?)"
+      );
+      for (const sid of uniqueSpaces) {
+        insertAccess.run(input.id, sid);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  return {
+    id: input.id,
+    name: input.name.trim(),
+    email,
+    role: input.role,
+    allSpaces: input.allSpaces,
+    spaceIds: uniqueSpaces,
+    createdAt: now,
+  };
+}
+
+export async function dbUpdateUserAccess(
+  id: string,
+  input: { role?: UserRole; allSpaces?: boolean; spaceIds?: string[] }
+): Promise<PublicUser | null> {
+  await ensureInitialized();
+  const existing = await dbFindUserById(id);
+  if (!existing) return null;
+
+  const nextRole = input.role ?? existing.role;
+  const nextAllSpaces = input.allSpaces ?? existing.allSpaces;
+  const nextSpaceIds = input.spaceIds
+    ? Array.from(new Set(input.spaceIds))
+    : existing.spaceIds;
+
+  if (getDatabaseDriver() === "postgres") {
+    const client = await getPgPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE users SET role = $1, all_spaces = $2 WHERE id = $3",
+        [nextRole, nextAllSpaces ? 1 : 0, id]
+      );
+      await client.query(
+        "DELETE FROM user_space_access WHERE user_id = $1",
+        [id]
+      );
+      for (const sid of nextSpaceIds) {
+        await client.query(
+          "INSERT INTO user_space_access (user_id, space_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [id, sid]
+        );
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    const db = await getSqlite();
+    db.exec("BEGIN");
+    try {
+      db.prepare("UPDATE users SET role = ?, all_spaces = ? WHERE id = ?").run(
+        nextRole,
+        nextAllSpaces ? 1 : 0,
+        id
+      );
+      db.prepare("DELETE FROM user_space_access WHERE user_id = ?").run(id);
+      const insertAccess = db.prepare(
+        "INSERT OR IGNORE INTO user_space_access (user_id, space_id) VALUES (?, ?)"
+      );
+      for (const sid of nextSpaceIds) {
+        insertAccess.run(id, sid);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  return {
+    ...existing,
+    role: nextRole,
+    allSpaces: nextAllSpaces,
+    spaceIds: nextSpaceIds,
+  };
+}
+
+export async function dbDeleteUser(id: string): Promise<boolean> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    const client = await getPgPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM user_space_access WHERE user_id = $1", [
+        id,
+      ]);
+      const res = await client.query("DELETE FROM users WHERE id = $1", [id]);
+      await client.query("COMMIT");
+      return (res.rowCount ?? 0) > 0;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  const db = await getSqlite();
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM user_space_access WHERE user_id = ?").run(id);
+    const res = db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    db.exec("COMMIT");
+    return Number(res.changes ?? 0) > 0;
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+export async function dbGetAgentBotDraftOnly(): Promise<boolean> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    const res = await getPgPool().query<{ value: string }>(
+      "SELECT value FROM workspace_settings WHERE key = 'agent_bot_draft_only'"
+    );
+    const val = res.rows[0]?.value;
+    return val === undefined ? true : val !== "false";
+  }
+  const db = await getSqlite();
+  const row = db
+    .prepare(
+      "SELECT value FROM workspace_settings WHERE key = 'agent_bot_draft_only'"
+    )
+    .get();
+  return row?.value === undefined ? true : String(row.value) !== "false";
+}
+
+export async function dbSetAgentBotDraftOnly(draftOnly: boolean): Promise<void> {
+  await ensureInitialized();
+  const value = draftOnly ? "true" : "false";
+  if (getDatabaseDriver() === "postgres") {
+    await getPgPool().query(
+      `INSERT INTO workspace_settings (key, value) VALUES ('agent_bot_draft_only', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [value]
+    );
+    return;
+  }
+  const db = await getSqlite();
+  db.prepare(
+    `INSERT INTO workspace_settings (key, value) VALUES ('agent_bot_draft_only', ?)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`
+  ).run(value);
 }
