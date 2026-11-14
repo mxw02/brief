@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAgentAuth } from "@/lib/agent-auth";
 import { buildAgentContextMarkdown } from "@/lib/agent-context";
+import {
+  matchesFrontmatterFilter,
+  parseFrontmatter,
+} from "@/lib/frontmatter";
 import { buildSearchIndex, searchDocuments } from "@/lib/search-index";
 import {
   createSpaceInStore,
@@ -279,17 +283,38 @@ export async function POST(request: NextRequest) {
       const query = typeof args.query === "string" ? args.query.trim() : "";
       const spaceFilter =
         typeof args.space === "string" ? args.space.trim().toLowerCase() : "";
+      const scopeFilter =
+        typeof args.scope === "string" ? args.scope.trim() : "";
+      const techStackFilter =
+        typeof args.techStack === "string" ? args.techStack.trim() : "";
       const includeDrafts = Boolean(args.includeDrafts);
 
       const candidates = documents.filter((doc) => {
         if (!includeDrafts && doc.status === "draft") return false;
         if (spaceFilter) {
           const sp = spaceMap.get(doc.spaceId);
-          return (
-            doc.spaceId.toLowerCase() === spaceFilter ||
-            sp?.slug.toLowerCase() === spaceFilter ||
-            sp?.name.toLowerCase() === spaceFilter
-          );
+          if (
+            doc.spaceId.toLowerCase() !== spaceFilter &&
+            sp?.slug.toLowerCase() !== spaceFilter &&
+            sp?.name.toLowerCase() !== spaceFilter
+          ) {
+            return false;
+          }
+        }
+        if (scopeFilter || techStackFilter) {
+          const { metadata } = parseFrontmatter(doc.content);
+          if (
+            scopeFilter &&
+            !matchesFrontmatterFilter(metadata, "scope", scopeFilter)
+          ) {
+            return false;
+          }
+          if (
+            techStackFilter &&
+            !matchesFrontmatterFilter(metadata, "tech-stack", techStackFilter)
+          ) {
+            return false;
+          }
         }
         return true;
       });
@@ -305,6 +330,8 @@ export async function POST(request: NextRequest) {
                 id: r.doc.id,
                 title: r.doc.title,
                 space: r.spaceName,
+                status: r.doc.status ?? "approved",
+                metadata: parseFrontmatter(r.doc.content).metadata,
                 snippet: r.snippet,
               })),
               null,
