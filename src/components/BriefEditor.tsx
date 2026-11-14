@@ -6,6 +6,7 @@ import {
   Check,
   Command,
   FilePlus2,
+  MessageSquare,
   Minimize2,
   PanelLeft,
   RotateCcw,
@@ -28,11 +29,13 @@ import {
   SPEC_STATUSES,
   type BriefDocument,
   type DocumentStatus,
+  type InlineComment,
   type Space,
 } from "@/lib/workspace";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
+import { CommentsPanel } from "./CommentsPanel";
 import { FrontmatterBar } from "./FrontmatterBar";
 import {
   RichDocumentEditor,
@@ -519,6 +522,70 @@ export function BriefEditor() {
     [documents]
   );
 
+  const handleAddInlineComment = useCallback(
+    (quote: string, body: string) => {
+      if (!activeDoc) return;
+      const comment: InlineComment = {
+        id: makeId("cmt"),
+        quote,
+        body,
+        author: "Author",
+        resolved: false,
+        createdAt: new Date().toISOString(),
+      };
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: [comment, ...(d.comments ?? [])],
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
+  const handleToggleResolveComment = useCallback(
+    (commentId: string) => {
+      if (!activeDoc) return;
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: (d.comments ?? []).map((c) =>
+                  c.id === commentId ? { ...c, resolved: !c.resolved } : c
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
+  const handleDeleteComment = useCallback(
+    (commentId: string) => {
+      if (!activeDoc) return;
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: (d.comments ?? []).filter((c) => c.id !== commentId),
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
   const stats = useMemo(() => {
     const trimmed = content.trim();
     const words = trimmed ? trimmed.split(/\s+/).length : 0;
@@ -719,6 +786,27 @@ export function BriefEditor() {
               />
               <div className="mt-1 flex shrink-0 items-center gap-2">
                 {(() => {
+                  const openComments = (activeDoc?.comments ?? []).filter(
+                    (c) => !c.resolved
+                  ).length;
+                  if (openComments === 0) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        document
+                          .getElementById("brief-comments-panel")
+                          ?.scrollIntoView({ behavior: "smooth" })
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800"
+                      title="Jump to open inline comments"
+                    >
+                      <MessageSquare className="h-3 w-3 text-teal-700" />
+                      {openComments}
+                    </button>
+                  );
+                })()}
+                {(() => {
                   const currentStatus = normalizeDocumentStatus(
                     activeDoc?.status
                   );
@@ -789,6 +877,13 @@ export function BriefEditor() {
               }
               onOpenOrCreateWikiLink={handleOpenOrCreateWikiLink}
               onCreateAndLinkDoc={handleCreateAndLinkDoc}
+              onAddInlineComment={handleAddInlineComment}
+            />
+
+            <CommentsPanel
+              comments={activeDoc?.comments ?? []}
+              onToggleResolve={handleToggleResolveComment}
+              onDeleteComment={handleDeleteComment}
             />
 
             <BacklinksPanel

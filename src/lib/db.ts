@@ -6,6 +6,7 @@ import {
   DEFAULT_SPACES,
   normalizeDocumentStatus,
   type BriefDocument,
+  type InlineComment,
   type Space,
 } from "./workspace";
 
@@ -81,7 +82,8 @@ CREATE TABLE IF NOT EXISTS documents (
   status TEXT NOT NULL DEFAULT 'published',
   proposed_by TEXT,
   proposal_target_id TEXT,
-  proposal_summary TEXT
+  proposal_summary TEXT,
+  comments_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS api_tokens (
@@ -159,6 +161,9 @@ async function ensureInitialized(): Promise<void> {
     if (driver === "postgres") {
       const pool = getPgPool();
       await pool.query(SCHEMA_SQL);
+      await pool.query(
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS comments_json TEXT"
+      );
       const res = await pool.query<{ count: string }>(
         "SELECT COUNT(*)::text AS count FROM spaces"
       );
@@ -206,6 +211,10 @@ async function ensureInitialized(): Promise<void> {
     }
 
     const db = await getSqlite();
+    const cols = db.prepare("PRAGMA table_info(documents)").all();
+    if (!cols.some((c) => c.name === "comments_json")) {
+      db.exec("ALTER TABLE documents ADD COLUMN comments_json TEXT;");
+    }
     const row = db.prepare("SELECT COUNT(*) AS count FROM spaces").get();
     if (Number(row?.count ?? 0) === 0) {
       const legacy = await readLegacyJsonSeed();
@@ -263,7 +272,20 @@ async function ensureInitialized(): Promise<void> {
   return initPromise;
 }
 
+function parseCommentsJson(raw: unknown): InlineComment[] | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0
+      ? (parsed as InlineComment[])
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapDocRow(row: Record<string, unknown>): BriefDocument {
+  const comments = parseCommentsJson(row.comments_json);
   return {
     id: String(row.id),
     spaceId: String(row.space_id),
@@ -279,6 +301,7 @@ function mapDocRow(row: Record<string, unknown>): BriefDocument {
     ...(row.proposal_summary
       ? { proposalSummary: String(row.proposal_summary) }
       : {}),
+    ...(comments ? { comments } : {}),
   };
 }
 
@@ -309,7 +332,7 @@ export async function dbReadWorkspace(): Promise<{
     const [spacesRes, docsRes] = await Promise.all([
       pool.query<Record<string, unknown>>("SELECT id, name, slug FROM spaces"),
       pool.query<Record<string, unknown>>(
-        "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary FROM documents"
+        "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json FROM documents"
       ),
     ]);
     return {
@@ -333,7 +356,7 @@ export async function dbReadWorkspace(): Promise<{
     }));
   const documents = db
     .prepare(
-      "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary FROM documents"
+      "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json FROM documents"
     )
     .all()
     .map(mapDocRow);
@@ -362,8 +385,8 @@ export async function dbWriteWorkspace(
       }
       for (const d of documents) {
         await client.query(
-          `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [
             d.id,
             d.spaceId,
@@ -371,10 +394,11 @@ export async function dbWriteWorkspace(
             d.title,
             d.content,
             d.updatedAt,
-            d.status ?? "published",
+            d.status ?? "approved",
             d.proposedBy ?? null,
             d.proposalTargetId ?? null,
             d.proposalSummary ?? null,
+            d.comments?.length ? JSON.stringify(d.comments) : null,
           ]
         );
       }
@@ -400,8 +424,8 @@ export async function dbWriteWorkspace(
       insertSpace.run(s.id, s.name, s.slug);
     }
     const insertDoc = db.prepare(
-      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO documents (id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, comments_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
     for (const d of documents) {
       insertDoc.run(
@@ -411,10 +435,11 @@ export async function dbWriteWorkspace(
         d.title,
         d.content,
         d.updatedAt,
-        d.status ?? "published",
+        d.status ?? "approved",
         d.proposedBy ?? null,
         d.proposalTargetId ?? null,
-        d.proposalSummary ?? null
+        d.proposalSummary ?? null,
+        d.comments?.length ? JSON.stringify(d.comments) : null
       );
     }
     db.exec("COMMIT");
