@@ -27,14 +27,14 @@ export function KansoTicketMenu({
   return (
     <div
       style={{ top: position.top, left: position.left }}
-      className="absolute z-40 max-h-72 w-96 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg"
+      className="absolute z-40 max-h-80 w-96 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-lg"
       role="listbox"
       aria-label="Kanso ticket suggestions"
     >
       <div className="flex items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
         <span className="inline-flex items-center gap-1">
           <KanbanSquare className="h-3 w-3 text-teal-700" />
-          Kanso Tickets {query ? `(#${query})` : "(#)"}
+          Kanso Tickets ({issues.length}){query ? ` · #${query}` : ""}
         </span>
         {loading && <Loader2 className="h-3 w-3 animate-spin text-teal-700" />}
       </div>

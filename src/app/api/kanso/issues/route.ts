@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
               return id.includes(q) || title.includes(q);
             })
           : list
-      ).slice(0, 15);
+      ).slice(0, 50);
 
       const issues: KansoIssueSummary[] = filtered
         .filter((item) => Boolean(item.identifier))
