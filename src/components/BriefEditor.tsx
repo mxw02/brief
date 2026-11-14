@@ -11,7 +11,9 @@ import {
   Minimize2,
   PanelLeft,
   RotateCcw,
+  Search,
 } from "lucide-react";
+import { buildSearchIndex } from "@/lib/search-index";
 import { SLASH_COMMANDS } from "@/lib/slash-commands";
 import {
   DEFAULT_DOCUMENTS,
@@ -27,6 +29,7 @@ import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
 } from "./RichDocumentEditor";
+import { SearchModal } from "./SearchModal";
 import { SpaceSidebar } from "./SpaceSidebar";
 
 const STORAGE_WORKSPACE_KEY = "brief:workspace:v2";
@@ -48,6 +51,7 @@ export function BriefEditor() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [copiedDoc, setCopiedDoc] = useState(false);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
@@ -122,12 +126,21 @@ export function BriefEditor() {
     [activeDoc?.id]
   );
 
-  // Global keyboard shortcuts (Cmd/Ctrl+K, Cmd/Ctrl+\)
+  // Global keyboard shortcuts (Cmd/Ctrl+K, Cmd/Ctrl+P, Cmd/Ctrl+Shift+F, Cmd/Ctrl+\)
   useEffect(() => {
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setSearchOpen(false);
         setPaletteOpen((prev) => !prev);
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key.toLowerCase() === "p" ||
+          (e.shiftKey && e.key.toLowerCase() === "f"))
+      ) {
+        e.preventDefault();
+        setPaletteOpen(false);
+        setSearchOpen((prev) => !prev);
       } else if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
         e.preventDefault();
         setFocusMode((prev) => !prev);
@@ -232,6 +245,11 @@ export function BriefEditor() {
     }
   }, [content, title]);
 
+  const searchIndex = useMemo(
+    () => buildSearchIndex(documents, spaces),
+    [documents, spaces]
+  );
+
   const backlinks = useMemo(
     () => (activeDoc ? findBacklinks(activeDoc, documents, spaces) : []),
     [activeDoc, documents, spaces]
@@ -240,6 +258,14 @@ export function BriefEditor() {
   const paletteActions: PaletteAction[] = useMemo(() => {
     const spaceMap = new Map(spaces.map((s) => [s.id, s.name]));
     return [
+      {
+        id: "open-search",
+        group: "Navigate" as const,
+        label: "Instant Full-Text Search",
+        description: "Search across all spaces and document contents (<50ms)",
+        shortcut: "⌘P",
+        onRun: () => setSearchOpen(true),
+      },
       ...documents.map((doc) => ({
         id: `nav-${doc.id}`,
         group: "Navigate" as const,
@@ -388,6 +414,19 @@ export function BriefEditor() {
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                title="Instant Search (Cmd+P)"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Search...</span>
+                <kbd className="rounded bg-white px-1 py-0.5 font-mono text-[10px] text-zinc-500 shadow-2xs">
+                  ⌘P
+                </kbd>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -541,6 +580,12 @@ export function BriefEditor() {
               </span>
               <span>
                 <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  ⌘P
+                </kbd>{" "}
+                search
+              </span>
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
                   ⌘K
                 </kbd>{" "}
                 palette
@@ -560,6 +605,14 @@ export function BriefEditor() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         actions={paletteActions}
+      />
+
+      <SearchModal
+        open={searchOpen}
+        index={searchIndex}
+        spaces={spaces}
+        onClose={() => setSearchOpen(false)}
+        onSelectDoc={setActiveDocId}
       />
     </div>
   );
