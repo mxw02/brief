@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Search, Zap } from "lucide-react";
+import { FileText, Search } from "lucide-react";
 import {
   searchDocuments,
   type SearchIndexedDoc,
@@ -66,7 +66,7 @@ export function SearchModal({
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { results, durationMs } = useMemo(
+  const { results } = useMemo(
     () => searchDocuments(index, query, selectedSpaceId),
     [index, query, selectedSpaceId]
   );
@@ -144,10 +144,6 @@ export function SearchModal({
             placeholder="Search all spaces and documents..."
             className="w-full bg-transparent text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
           />
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-medium text-emerald-800">
-            <Zap className="h-2.5 w-2.5" />
-            {durationMs < 0.1 ? "<0.1" : durationMs.toFixed(1)} ms
-          </span>
           <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
             ESC
           </kbd>
