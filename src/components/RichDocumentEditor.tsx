@@ -24,7 +24,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
-import { MessageSquarePlus, X } from "lucide-react";
+import { KanbanSquare, Loader2, MessageSquarePlus, X } from "lucide-react";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown-bridge";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import { BRIEF_DOC_HREF_PREFIX, type BriefDocument, type Space } from "@/lib/workspace";
@@ -104,6 +104,7 @@ export interface RichDocumentEditorHandle {
 
 interface RichDocumentEditorProps {
   docId: string;
+  docTitle?: string;
   content: string;
   documents: BriefDocument[];
   spaces: Space[];
@@ -140,6 +141,7 @@ export const RichDocumentEditor = forwardRef<
 >(function RichDocumentEditor(
   {
     docId,
+    docTitle,
     content,
     documents,
     spaces,
@@ -174,13 +176,47 @@ export const RichDocumentEditor = forwardRef<
 
   const [selectionComment, setSelectionComment] = useState<{
     quote: string;
+    fullText: string;
     from: number;
     to: number;
     top: number;
     left: number;
     composing: boolean;
+    mode: "bar" | "comment" | "kanso";
     draft: string;
+    ticketTitle: string;
+    ticketDescription: string;
+    ticketProjectId: string;
+    ticketPriority: string;
+    ticketSubmitting: boolean;
+    ticketError: string | null;
   } | null>(null);
+
+  const [kansoProjects, setKansoProjects] = useState<
+    Array<{ id: string; key: string; name: string }>
+  >([]);
+  const kansoProjectsRef = useRef(kansoProjects);
+  kansoProjectsRef.current = kansoProjects;
+  const [kansoProjectsLoading, setKansoProjectsLoading] = useState(false);
+
+  const loadKansoProjects = useCallback(async () => {
+    if (kansoProjects.length > 0) return kansoProjects;
+    setKansoProjectsLoading(true);
+    try {
+      const res = await fetch("/api/kanso/projects");
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        projects?: Array<{ id: string; key: string; name: string }>;
+      };
+      const list = Array.isArray(data.projects) ? data.projects : [];
+      setKansoProjects(list);
+      return list;
+    } catch {
+      return [];
+    } finally {
+      setKansoProjectsLoading(false);
+    }
+  }, [kansoProjects]);
 
   const filteredSlashCommands = useMemo(() => {
     const q = slashState.query.trim().toLowerCase();
@@ -458,20 +494,29 @@ export const RichDocumentEditor = forwardRef<
         setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
         setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
         setKansoState((p) => (p.open ? CLOSED_TRIGGER : p));
-        const selectedText = state.doc.textBetween(from, to, " ").trim();
-        if (selectedText && onAddInlineComment) {
+        const selectedText = state.doc.textBetween(from, to, "\n").trim();
+        if (selectedText) {
           const coords = getCursorCoords(from);
+          const firstLine = selectedText.split("\n")[0]?.trim() || selectedText;
           setSelectionComment((prev) =>
             prev?.composing
               ? prev
               : {
-                  quote: selectedText.slice(0, 140),
+                  quote: selectedText.replace(/\s+/g, " ").slice(0, 140),
+                  fullText: selectedText,
                   from,
                   to,
                   top: Math.max(8, coords.top - 64),
                   left: Math.min(coords.left, 420),
                   composing: false,
+                  mode: "bar",
                   draft: "",
+                  ticketTitle: firstLine.slice(0, 100),
+                  ticketDescription: selectedText,
+                  ticketProjectId: kansoProjectsRef.current[0]?.id ?? "",
+                  ticketPriority: "MEDIUM",
+                  ticketSubmitting: false,
+                  ticketError: null,
                 }
           );
         }
@@ -542,7 +587,7 @@ export const RichDocumentEditor = forwardRef<
       }
       setKansoState((p) => (p.open ? CLOSED_TRIGGER : p));
     },
-    [getCursorCoords, onAddInlineComment]
+    [getCursorCoords]
   );
 
   const applySlashCommand = useCallback(
@@ -682,26 +727,52 @@ export const RichDocumentEditor = forwardRef<
     <div ref={containerRef} className="relative flex-1">
       <EditorContent editor={editor} />
 
-      {selectionComment && onAddInlineComment && (
+      {selectionComment && (
         <div
           style={{ top: selectionComment.top, left: selectionComment.left }}
           className="absolute z-30 rounded-xl border border-zinc-200 bg-white shadow-lg"
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {!selectionComment.composing ? (
-            <button
-              type="button"
-              onClick={() =>
-                setSelectionComment((prev) =>
-                  prev ? { ...prev, composing: true } : null
-                )
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:text-teal-700"
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5 text-teal-700" />
-              Comment
-            </button>
-          ) : (
+          {selectionComment.mode === "bar" ? (
+            <div className="flex items-center divide-x divide-zinc-200">
+              {onAddInlineComment && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectionComment((prev) =>
+                      prev ? { ...prev, composing: true, mode: "comment" } : null
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:text-teal-700"
+                >
+                  <MessageSquarePlus className="h-3.5 w-3.5 text-teal-700" />
+                  Comment
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  setSelectionComment((prev) =>
+                    prev ? { ...prev, composing: true, mode: "kanso" } : null
+                  );
+                  const list = await loadKansoProjects();
+                  if (list.length > 0) {
+                    const preferred =
+                      list.find((p) => p.key === "BRIE") ?? list[0];
+                    setSelectionComment((prev) =>
+                      prev && !prev.ticketProjectId
+                        ? { ...prev, ticketProjectId: preferred.id }
+                        : prev
+                    );
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:text-teal-700"
+              >
+                <KanbanSquare className="h-3.5 w-3.5 text-teal-700" />
+                In Kanso-Ticket umwandeln
+              </button>
+            </div>
+          ) : selectionComment.mode === "comment" && onAddInlineComment ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -754,6 +825,195 @@ export const RichDocumentEditor = forwardRef<
                   className="rounded-md bg-teal-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-teal-800"
                 >
                   Comment
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const title = selectionComment.ticketTitle.trim();
+                const projectId = selectionComment.ticketProjectId.trim();
+                if (!title || !projectId || selectionComment.ticketSubmitting) {
+                  return;
+                }
+                setSelectionComment((prev) =>
+                  prev
+                    ? { ...prev, ticketSubmitting: true, ticketError: null }
+                    : null
+                );
+                try {
+                  const res = await fetch("/api/kanso/issues", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      projectId,
+                      title,
+                      description: selectionComment.ticketDescription,
+                      priority: selectionComment.ticketPriority,
+                      docId,
+                      docTitle: docTitle || "Untitled Page",
+                      sourceUrl:
+                        typeof window !== "undefined"
+                          ? window.location.href
+                          : undefined,
+                    }),
+                  });
+                  const data = (await res.json()) as {
+                    issue?: KansoIssueSummary;
+                    error?: string;
+                  };
+                  if (!res.ok || !data.issue?.identifier) {
+                    setSelectionComment((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            ticketSubmitting: false,
+                            ticketError:
+                              data.error || "Ticket konnte nicht erstellt werden",
+                          }
+                        : null
+                    );
+                    return;
+                  }
+
+                  const insertAt = selectionComment.to;
+                  const refText = ` #${data.issue.identifier}`;
+                  setSelectionComment(null);
+                  editor
+                    ?.chain()
+                    .focus()
+                    .insertContentAt(insertAt, refText)
+                    .run();
+                } catch {
+                  setSelectionComment((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          ticketSubmitting: false,
+                          ticketError: "Kanso ist nicht erreichbar",
+                        }
+                      : null
+                  );
+                }
+              }}
+              className="w-80 p-3"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800">
+                  <KanbanSquare className="h-3.5 w-3.5 text-teal-700" />
+                  In Kanso-Ticket umwandeln
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectionComment(null)}
+                  className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                    Projekt
+                  </label>
+                  <select
+                    value={selectionComment.ticketProjectId}
+                    disabled={kansoProjectsLoading}
+                    onChange={(e) =>
+                      setSelectionComment((prev) =>
+                        prev
+                          ? { ...prev, ticketProjectId: e.target.value }
+                          : null
+                      )
+                    }
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 focus:border-teal-700 focus:bg-white focus:outline-none"
+                  >
+                    {kansoProjects.length === 0 ? (
+                      <option value="">
+                        {kansoProjectsLoading
+                          ? "Lade Projekte..."
+                          : "Keine Projekte gefunden"}
+                      </option>
+                    ) : (
+                      kansoProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.key} — {p.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                    Titel
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={selectionComment.ticketTitle}
+                    onChange={(e) =>
+                      setSelectionComment((prev) =>
+                        prev ? { ...prev, ticketTitle: e.target.value } : null
+                      )
+                    }
+                    placeholder="Ticket-Titel..."
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 focus:border-teal-700 focus:bg-white focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                    Priorität
+                  </label>
+                  <select
+                    value={selectionComment.ticketPriority}
+                    onChange={(e) =>
+                      setSelectionComment((prev) =>
+                        prev
+                          ? { ...prev, ticketPriority: e.target.value }
+                          : null
+                      )
+                    }
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 focus:border-teal-700 focus:bg-white focus:outline-none"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                    <option value="URGENT">Urgent</option>
+                  </select>
+                </div>
+
+                {selectionComment.ticketError && (
+                  <p className="text-[11px] text-rose-600">
+                    {selectionComment.ticketError}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-3 flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectionComment(null)}
+                  className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-100"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    selectionComment.ticketSubmitting ||
+                    !selectionComment.ticketProjectId ||
+                    !selectionComment.ticketTitle.trim()
+                  }
+                  className="inline-flex items-center gap-1 rounded-md bg-teal-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-teal-800 disabled:opacity-50"
+                >
+                  {selectionComment.ticketSubmitting && (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  )}
+                  Ticket anlegen
                 </button>
               </div>
             </form>

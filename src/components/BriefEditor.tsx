@@ -870,6 +870,7 @@ export function BriefEditor() {
             <RichDocumentEditor
               ref={richEditorRef}
               docId={activeDoc?.id ?? "default"}
+              docTitle={activeDoc?.title ?? "Untitled Page"}
               content={parsedFrontmatter.body}
               documents={documents}
               spaces={spaces}
