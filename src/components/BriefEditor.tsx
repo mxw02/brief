@@ -230,6 +230,7 @@ export function BriefEditor() {
         title: docTitle,
         content: `## Overview\n\nStart writing **${docTitle}**...\n`,
         updatedAt: new Date().toISOString(),
+        status: "draft",
       };
       setDocuments((prev) => [...prev, newDoc]);
       setActiveDocId(newDoc.id);
@@ -299,6 +300,7 @@ export function BriefEditor() {
         title: docTitle,
         content: `## Overview\n\n`,
         updatedAt: new Date().toISOString(),
+        status: "draft",
       };
       setDocuments((prev) => [...prev, newDoc]);
     },
@@ -667,7 +669,12 @@ export function BriefEditor() {
 
         <main className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-8">
           <article className="mx-auto flex w-full max-w-4xl flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
-            {activeDoc?.status === "draft" && (
+            {activeDoc?.status === "draft" &&
+              Boolean(
+                activeDoc.proposedBy ||
+                  activeDoc.proposalTargetId ||
+                  activeDoc.proposalSummary
+              ) && (
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">
