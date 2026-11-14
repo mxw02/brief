@@ -1,7 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { FileText, FolderPlus, Hash, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  FolderPlus,
+  Hash,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import type { BriefDocument, Space } from "@/lib/workspace";
 
 interface SpaceSidebarProps {
@@ -9,9 +17,128 @@ interface SpaceSidebarProps {
   documents: BriefDocument[];
   activeDocId: string;
   onSelectDoc: (docId: string) => void;
-  onCreateDoc: (spaceId: string) => void;
+  onCreateDoc: (spaceId: string, parentId?: string | null) => void;
   onDeleteDoc: (docId: string) => void;
   onCreateSpace: (name: string) => void;
+}
+
+interface TreeNodeProps {
+  doc: BriefDocument;
+  depth: number;
+  childrenByParent: Map<string | null, BriefDocument[]>;
+  activeDocId: string;
+  expandedIds: Set<string>;
+  canDelete: boolean;
+  onToggleExpand: (docId: string) => void;
+  onSelectDoc: (docId: string) => void;
+  onCreateChild: (spaceId: string, parentId: string) => void;
+  onDeleteDoc: (docId: string) => void;
+}
+
+function DocumentTreeNode({
+  doc,
+  depth,
+  childrenByParent,
+  activeDocId,
+  expandedIds,
+  canDelete,
+  onToggleExpand,
+  onSelectDoc,
+  onCreateChild,
+  onDeleteDoc,
+}: TreeNodeProps) {
+  const children = childrenByParent.get(doc.id) ?? [];
+  const hasChildren = children.length > 0;
+  const isExpanded = expandedIds.has(doc.id);
+  const isActive = doc.id === activeDocId;
+
+  return (
+    <div>
+      <div
+        style={{ paddingLeft: `${depth * 14 + 6}px` }}
+        className={`group flex items-center justify-between rounded-lg border py-1.5 pr-1.5 transition-colors ${
+          isActive
+            ? "border-teal-200 bg-teal-50 text-teal-800"
+            : "border-transparent text-zinc-600 hover:bg-white hover:text-zinc-900"
+        }`}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={() => onToggleExpand(doc.id)}
+              className="rounded p-0.5 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700"
+              aria-label={isExpanded ? "Collapse child pages" : "Expand child pages"}
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+            </button>
+          ) : (
+            <span className="w-4 shrink-0" />
+          )}
+
+          <button
+            type="button"
+            onClick={() => onSelectDoc(doc.id)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          >
+            <FileText
+              className={`h-3.5 w-3.5 shrink-0 ${
+                isActive ? "text-teal-700" : "text-zinc-400"
+              }`}
+            />
+            <span className="truncate text-xs font-medium">
+              {doc.title || "Untitled"}
+            </span>
+          </button>
+        </div>
+
+        <div className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => onCreateChild(doc.spaceId, doc.id)}
+            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-teal-700"
+            title="Add nested child page"
+          >
+            <Plus className="h-3 w-3" />
+          </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => onDeleteDoc(doc.id)}
+              className="rounded p-0.5 text-zinc-400 hover:bg-red-50 hover:text-red-600"
+              title="Delete page"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {hasChildren && isExpanded && (
+        <div className="mt-0.5 space-y-0.5">
+          {children.map((child) => (
+            <DocumentTreeNode
+              key={child.id}
+              doc={child}
+              depth={depth + 1}
+              childrenByParent={childrenByParent}
+              activeDocId={activeDocId}
+              expandedIds={expandedIds}
+              canDelete={canDelete}
+              onToggleExpand={onToggleExpand}
+              onSelectDoc={onSelectDoc}
+              onCreateChild={onCreateChild}
+              onDeleteDoc={onDeleteDoc}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function SpaceSidebar({
@@ -25,6 +152,24 @@ export function SpaceSidebar({
 }: SpaceSidebarProps) {
   const [addingSpace, setAddingSpace] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState("");
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+
+  const expandedIds = useMemo(() => {
+    const expanded = new Set<string>();
+    for (const d of documents) {
+      if (!collapsedIds.has(d.id)) expanded.add(d.id);
+    }
+    return expanded;
+  }, [documents, collapsedIds]);
+
+  const toggleExpand = (docId: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
+      return next;
+    });
+  };
 
   const handleAddSpace = (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +234,21 @@ export function SpaceSidebar({
       <nav className="flex-1 space-y-5 overflow-y-auto p-3" aria-label="Spaces">
         {spaces.map((space) => {
           const spaceDocs = documents.filter((d) => d.spaceId === space.id);
+          const spaceDocIds = new Set(spaceDocs.map((d) => d.id));
+          const childrenByParent = new Map<string | null, BriefDocument[]>();
+
+          for (const doc of spaceDocs) {
+            const parentKey =
+              doc.parentId && spaceDocIds.has(doc.parentId)
+                ? doc.parentId
+                : null;
+            const list = childrenByParent.get(parentKey) ?? [];
+            list.push(doc);
+            childrenByParent.set(parentKey, list);
+          }
+
+          const rootDocs = childrenByParent.get(null) ?? [];
+
           return (
             <div key={space.id}>
               <div className="group mb-1.5 flex items-center justify-between px-1.5">
@@ -101,7 +261,7 @@ export function SpaceSidebar({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onCreateDoc(space.id)}
+                  onClick={() => onCreateDoc(space.id, null)}
                   className="rounded p-0.5 text-zinc-400 opacity-75 transition-colors hover:bg-white hover:text-teal-700 group-hover:opacity-100"
                   title={`New page in ${space.name}`}
                 >
@@ -110,53 +270,30 @@ export function SpaceSidebar({
               </div>
 
               <div className="space-y-0.5">
-                {spaceDocs.length === 0 ? (
+                {rootDocs.length === 0 ? (
                   <button
                     type="button"
-                    onClick={() => onCreateDoc(space.id)}
+                    onClick={() => onCreateDoc(space.id, null)}
                     className="w-full rounded-lg border border-dashed border-zinc-200 px-2.5 py-1.5 text-left text-[11px] text-zinc-400 hover:border-teal-200 hover:text-teal-700"
                   >
                     + Add first page
                   </button>
                 ) : (
-                  spaceDocs.map((doc) => {
-                    const isActive = doc.id === activeDocId;
-                    return (
-                      <div
-                        key={doc.id}
-                        className={`group flex items-center justify-between rounded-lg border px-2 py-1.5 transition-colors ${
-                          isActive
-                            ? "border-teal-200 bg-teal-50 text-teal-800"
-                            : "border-transparent text-zinc-600 hover:bg-white hover:text-zinc-900"
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => onSelectDoc(doc.id)}
-                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                        >
-                          <FileText
-                            className={`h-3.5 w-3.5 shrink-0 ${
-                              isActive ? "text-teal-700" : "text-zinc-400"
-                            }`}
-                          />
-                          <span className="truncate text-xs font-medium">
-                            {doc.title || "Untitled"}
-                          </span>
-                        </button>
-                        {documents.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => onDeleteDoc(doc.id)}
-                            className="ml-1 hidden rounded p-0.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 group-hover:inline-flex"
-                            title="Delete page"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })
+                  rootDocs.map((doc) => (
+                    <DocumentTreeNode
+                      key={doc.id}
+                      doc={doc}
+                      depth={0}
+                      childrenByParent={childrenByParent}
+                      activeDocId={activeDocId}
+                      expandedIds={expandedIds}
+                      canDelete={documents.length > 1}
+                      onToggleExpand={toggleExpand}
+                      onSelectDoc={onSelectDoc}
+                      onCreateChild={(sid, pid) => onCreateDoc(sid, pid)}
+                      onDeleteDoc={onDeleteDoc}
+                    />
+                  ))
                 )}
               </div>
             </div>

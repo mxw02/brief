@@ -1,0 +1,444 @@
+"use client";
+
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  EditorContent,
+  ReactNodeViewRenderer,
+  useEditor,
+} from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { common, createLowlight } from "lowlight";
+import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown-bridge";
+import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
+import { BRIEF_DOC_HREF_PREFIX, type BriefDocument, type Space } from "@/lib/workspace";
+import { RichCodeBlock } from "./RichCodeBlock";
+import { SlashCommandMenu } from "./SlashCommandMenu";
+import { WikiLinkMenu } from "./WikiLinkMenu";
+
+const lowlight = createLowlight(common);
+
+const CustomCodeBlock = CodeBlockLowlight.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(RichCodeBlock);
+  },
+}).configure({
+  lowlight,
+  defaultLanguage: "typescript",
+});
+
+export interface RichDocumentEditorHandle {
+  insertMarkdownSnippet: (snippet: string) => void;
+  focus: () => void;
+}
+
+interface RichDocumentEditorProps {
+  docId: string;
+  content: string;
+  documents: BriefDocument[];
+  spaces: Space[];
+  onChangeMarkdown: (markdown: string) => void;
+  onOpenOrCreateWikiLink: (targetTitle: string) => void;
+  onCreateAndLinkDoc: (title: string) => void;
+}
+
+interface TriggerState {
+  open: boolean;
+  query: string;
+  from: number;
+  to: number;
+  position: { top: number; left: number };
+}
+
+const CLOSED_TRIGGER: TriggerState = {
+  open: false,
+  query: "",
+  from: 0,
+  to: 0,
+  position: { top: 48, left: 24 },
+};
+
+export const RichDocumentEditor = forwardRef<
+  RichDocumentEditorHandle,
+  RichDocumentEditorProps
+>(function RichDocumentEditor(
+  {
+    docId,
+    content,
+    documents,
+    spaces,
+    onChangeMarkdown,
+    onOpenOrCreateWikiLink,
+    onCreateAndLinkDoc,
+  },
+  ref
+) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastLoadedDocIdRef = useRef<string>(docId);
+  const isApplyingExternalRef = useRef(false);
+
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashState, setSlashState] = useState<TriggerState>(CLOSED_TRIGGER);
+
+  const [wikiIndex, setWikiIndex] = useState(0);
+  const [wikiState, setWikiState] = useState<TriggerState>(CLOSED_TRIGGER);
+
+  const filteredSlashCommands = useMemo(() => {
+    const q = slashState.query.trim().toLowerCase();
+    if (!q) return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter(
+      (cmd) =>
+        cmd.label.toLowerCase().includes(q) ||
+        cmd.shortcut.toLowerCase().includes(`/${q}`) ||
+        cmd.keywords.some((kw) => kw.includes(q))
+    );
+  }, [slashState.query]);
+
+  const filteredWikiDocs = useMemo(() => {
+    const q = wikiState.query.trim().toLowerCase();
+    const candidates = documents.filter((d) => d.id !== docId);
+    if (!q) return candidates;
+    return candidates.filter((d) => d.title.toLowerCase().includes(q));
+  }, [documents, docId, wikiState.query]);
+
+  const wikiTotalOptions = useMemo(() => {
+    const trimmed = wikiState.query.trim();
+    const exactExists = filteredWikiDocs.some(
+      (d) => d.title.trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    return filteredWikiDocs.length + (trimmed && !exactExists ? 1 : 0);
+  }, [filteredWikiDocs, wikiState.query]);
+
+  // Refs for latest state inside TipTap handleKeyDown closure
+  const slashStateRef = useRef(slashState);
+  slashStateRef.current = slashState;
+  const slashIndexRef = useRef(slashIndex);
+  slashIndexRef.current = slashIndex;
+  const filteredSlashRef = useRef(filteredSlashCommands);
+  filteredSlashRef.current = filteredSlashCommands;
+
+  const wikiStateRef = useRef(wikiState);
+  wikiStateRef.current = wikiState;
+  const wikiIndexRef = useRef(wikiIndex);
+  wikiIndexRef.current = wikiIndex;
+  const filteredWikiRef = useRef(filteredWikiDocs);
+  filteredWikiRef.current = filteredWikiDocs;
+  const wikiTotalRef = useRef(wikiTotalOptions);
+  wikiTotalRef.current = wikiTotalOptions;
+
+  useEffect(() => {
+    if (slashIndex >= filteredSlashCommands.length) setSlashIndex(0);
+  }, [slashIndex, filteredSlashCommands.length]);
+
+  useEffect(() => {
+    if (wikiIndex >= wikiTotalOptions) setWikiIndex(0);
+  }, [wikiIndex, wikiTotalOptions]);
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        codeBlock: false,
+        heading: { levels: [1, 2, 3] },
+      }),
+      Placeholder.configure({
+        placeholder:
+          "Start writing, or type / for blocks & templates, [[ to link a page...",
+      }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      CustomCodeBlock,
+    ],
+    content: markdownToHtml(content),
+    editorProps: {
+      attributes: {
+        class: "brief-rich-editor focus:outline-none min-h-[62vh]",
+      },
+      handleClick: (_view, _pos, event) => {
+        const target = event.target as HTMLElement | null;
+        const anchor = target?.closest("a");
+        if (!anchor) return false;
+        const href = anchor.getAttribute("href") ?? "";
+        if (href.startsWith(BRIEF_DOC_HREF_PREFIX)) {
+          event.preventDefault();
+          const title = decodeURIComponent(
+            href.slice(BRIEF_DOC_HREF_PREFIX.length)
+          );
+          onOpenOrCreateWikiLink(title);
+          return true;
+        }
+        return false;
+      },
+      handleKeyDown: (_view, event) => {
+        if (wikiStateRef.current.open) {
+          const total = wikiTotalRef.current;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setWikiIndex((prev) => (total === 0 ? 0 : (prev + 1) % total));
+            return true;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setWikiIndex((prev) =>
+              total === 0 ? 0 : (prev - 1 + total) % total
+            );
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const idx = wikiIndexRef.current;
+            const docs = filteredWikiRef.current;
+            if (idx < docs.length) {
+              event.preventDefault();
+              applyWikiSelectionRef.current(docs[idx].title, false);
+              return true;
+            }
+            if (idx === docs.length && wikiStateRef.current.query.trim()) {
+              event.preventDefault();
+              applyWikiSelectionRef.current(
+                wikiStateRef.current.query.trim(),
+                true
+              );
+              return true;
+            }
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setWikiState(CLOSED_TRIGGER);
+            return true;
+          }
+        }
+
+        if (slashStateRef.current.open) {
+          const cmds = filteredSlashRef.current;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setSlashIndex((prev) =>
+              cmds.length === 0 ? 0 : (prev + 1) % cmds.length
+            );
+            return true;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setSlashIndex((prev) =>
+              cmds.length === 0 ? 0 : (prev - 1 + cmds.length) % cmds.length
+            );
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const cmd = cmds[slashIndexRef.current];
+            if (cmd) {
+              event.preventDefault();
+              applySlashSelectionRef.current(cmd);
+              return true;
+            }
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setSlashState(CLOSED_TRIGGER);
+            return true;
+          }
+        }
+
+        return false;
+      },
+    },
+    onUpdate: ({ editor: ed }) => {
+      if (isApplyingExternalRef.current) return;
+      const md = htmlToMarkdown(ed.getHTML());
+      onChangeMarkdown(md);
+      detectTriggers(ed);
+    },
+    onSelectionUpdate: ({ editor: ed }) => {
+      detectTriggers(ed);
+    },
+  });
+
+  const getCursorCoords = useCallback(
+    (pos: number): { top: number; left: number } => {
+      if (!editor || !containerRef.current) return { top: 48, left: 24 };
+      try {
+        const coords = editor.view.coordsAtPos(pos);
+        const rect = containerRef.current.getBoundingClientRect();
+        return {
+          top: Math.max(16, coords.bottom - rect.top + 8),
+          left: Math.min(
+            Math.max(16, coords.left - rect.left),
+            Math.max(16, rect.width - 336)
+          ),
+        };
+      } catch {
+        return { top: 48, left: 24 };
+      }
+    },
+    [editor]
+  );
+
+  const detectTriggers = useCallback(
+    (ed: NonNullable<typeof editor>) => {
+      const { state } = ed;
+      const { from, empty } = state.selection;
+      if (!empty) {
+        setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
+        setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+        return;
+      }
+
+      const $from = state.selection.$from;
+      // Don't trigger inside code blocks
+      if ($from.parent.type.name === "codeBlock") {
+        setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
+        setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+        return;
+      }
+
+      const blockStart = $from.start();
+      const textBefore = state.doc.textBetween(blockStart, from, "\n", "\0");
+
+      const wikiMatch = /\[\[([^[\]\n]*)$/.exec(textBefore);
+      if (wikiMatch) {
+        const triggerStart = from - wikiMatch[0].length;
+        setWikiIndex(0);
+        setWikiState({
+          open: true,
+          query: wikiMatch[1] ?? "",
+          from: triggerStart,
+          to: from,
+          position: getCursorCoords(from),
+        });
+        setSlashState(CLOSED_TRIGGER);
+        return;
+      }
+      setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+
+      const slashMatch = /(?:^|\s)\/([a-zA-Z0-9_-]*)$/.exec(textBefore);
+      if (slashMatch) {
+        const offset = slashMatch[0].startsWith("/") ? 0 : 1;
+        const triggerStart = from - slashMatch[0].length + offset;
+        setSlashIndex(0);
+        setSlashState({
+          open: true,
+          query: slashMatch[1] ?? "",
+          from: triggerStart,
+          to: from,
+          position: getCursorCoords(from),
+        });
+        return;
+      }
+      setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
+    },
+    [getCursorCoords]
+  );
+
+  const applySlashCommand = useCallback(
+    (cmd: SlashCommand) => {
+      if (!editor) return;
+      const { from, to } = slashStateRef.current;
+      setSlashState(CLOSED_TRIGGER);
+
+      const html = markdownToHtml(cmd.snippet);
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent(html)
+        .run();
+    },
+    [editor]
+  );
+
+  const applyWikiLink = useCallback(
+    (docTitle: string, createMissing: boolean) => {
+      if (!editor) return;
+      const { from, to } = wikiStateRef.current;
+      setWikiState(CLOSED_TRIGGER);
+
+      if (createMissing) {
+        onCreateAndLinkDoc(docTitle);
+      }
+
+      const href = `${BRIEF_DOC_HREF_PREFIX}${encodeURIComponent(docTitle)}`;
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent(
+          `<a href="${href}">${docTitle}</a> `
+        )
+        .run();
+    },
+    [editor, onCreateAndLinkDoc]
+  );
+
+  const applySlashSelectionRef = useRef(applySlashCommand);
+  applySlashSelectionRef.current = applySlashCommand;
+  const applyWikiSelectionRef = useRef(applyWikiLink);
+  applyWikiSelectionRef.current = applyWikiLink;
+
+  // Sync editor content when switching documents or resetting workspace
+  useEffect(() => {
+    if (!editor) return;
+    if (lastLoadedDocIdRef.current !== docId) {
+      lastLoadedDocIdRef.current = docId;
+      isApplyingExternalRef.current = true;
+      editor.commands.setContent(markdownToHtml(content), { emitUpdate: false });
+      isApplyingExternalRef.current = false;
+      setSlashState(CLOSED_TRIGGER);
+      setWikiState(CLOSED_TRIGGER);
+    }
+  }, [docId, content, editor]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertMarkdownSnippet: (snippet: string) => {
+        if (!editor) return;
+        const html = markdownToHtml(snippet);
+        editor.chain().focus().insertContent(html).run();
+      },
+      focus: () => {
+        editor?.commands.focus();
+      },
+    }),
+    [editor]
+  );
+
+  return (
+    <div ref={containerRef} className="relative flex-1">
+      <EditorContent editor={editor} />
+
+      {slashState.open && (
+        <SlashCommandMenu
+          commands={filteredSlashCommands}
+          activeIndex={slashIndex}
+          position={slashState.position}
+          onSelect={applySlashCommand}
+          onHover={setSlashIndex}
+        />
+      )}
+
+      {wikiState.open && (
+        <WikiLinkMenu
+          query={wikiState.query}
+          documents={filteredWikiDocs}
+          spaces={spaces}
+          activeIndex={wikiIndex}
+          position={wikiState.position}
+          onSelectDoc={(docTitle) => applyWikiLink(docTitle, false)}
+          onCreateAndLink={(docTitle) => applyWikiLink(docTitle, true)}
+          onHover={setWikiIndex}
+        />
+      )}
+    </div>
+  );
+});

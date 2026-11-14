@@ -7,6 +7,7 @@ export interface Space {
 export interface BriefDocument {
   id: string;
   spaceId: string;
+  parentId: string | null;
   title: string;
   content: string;
   updatedAt: string;
@@ -28,6 +29,7 @@ export const DEFAULT_DOCUMENTS: BriefDocument[] = [
   {
     id: "doc-arch",
     spaceId: "space-eng",
+    parentId: null,
     title: "Brief Architecture & Editor Spec",
     updatedAt: "2026-11-14T14:20:00.000Z",
     content: `# Brief — Distraction-Free Documentation
@@ -65,6 +67,7 @@ flowchart LR
   {
     id: "doc-selfhost",
     spaceId: "space-eng",
+    parentId: "doc-arch",
     title: "Self-Hosting & Database Guide",
     updatedAt: "2026-11-14T14:15:00.000Z",
     content: `# Self-Hosting & Database Guide
@@ -86,6 +89,7 @@ docker compose up -d
   {
     id: "doc-roadmap",
     spaceId: "space-prod",
+    parentId: null,
     title: "Q4 Product Roadmap",
     updatedAt: "2026-11-14T14:10:00.000Z",
     content: `# Q4 Product Roadmap
@@ -103,6 +107,7 @@ Related specs: [[Brief Architecture & Editor Spec]] and [[Self-Hosting & Databas
   {
     id: "doc-onboarding",
     spaceId: "space-comp",
+    parentId: null,
     title: "Team Onboarding",
     updatedAt: "2026-11-14T14:05:00.000Z",
     content: `# Team Onboarding
@@ -167,6 +172,26 @@ export function findBacklinks(
   }
 
   return results;
+}
+
+export function getDocumentAncestors(
+  docId: string,
+  allDocs: BriefDocument[]
+): BriefDocument[] {
+  const byId = new Map(allDocs.map((d) => [d.id, d]));
+  const chain: BriefDocument[] = [];
+  const seen = new Set<string>();
+  let current = byId.get(docId);
+
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId);
+    const parent = byId.get(current.parentId);
+    if (!parent) break;
+    chain.unshift(parent);
+    current = parent;
+  }
+
+  return chain;
 }
 
 export const BRIEF_DOC_HREF_PREFIX = "#brief-doc:";
