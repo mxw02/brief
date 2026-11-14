@@ -16,11 +16,17 @@ export function extractTicketIdentifiers(markdown: string): string[] {
   return Array.from(ids);
 }
 
+export interface AgentContextOptions {
+  sameSpaceOnly?: boolean;
+}
+
 export function buildAgentContextMarkdown(
   doc: BriefDocument,
   allDocs: BriefDocument[],
-  spaces: Space[]
+  spaces: Space[],
+  options: AgentContextOptions = { sameSpaceOnly: true }
 ): string {
+  const sameSpaceOnly = options.sameSpaceOnly ?? true;
   const spaceMap = new Map(spaces.map((s) => [s.id, s.name]));
   const spaceName = spaceMap.get(doc.spaceId) ?? "Space";
   const ancestors = getDocumentAncestors(doc.id, allDocs);
@@ -34,6 +40,7 @@ export function buildAgentContextMarkdown(
     "---",
     `title: "${(doc.title || "Untitled").replace(/"/g, '\\"')}"`,
     `space: "${spaceName}"`,
+    `scope: "${sameSpaceOnly ? "space-only" : "cross-space"}"`,
     `path: "${breadcrumb}"`,
     `updated_at: "${doc.updatedAt}"`,
     "---",
@@ -43,8 +50,10 @@ export function buildAgentContextMarkdown(
     doc.content.trim(),
   ];
 
-  // 1. Direct nested child pages
-  const childDocs = allDocs.filter((d) => d.parentId === doc.id);
+  // 1. Direct nested child pages (scoped to same space when sameSpaceOnly is true)
+  const childDocs = allDocs.filter(
+    (d) => d.parentId === doc.id && (!sameSpaceOnly || d.spaceId === doc.spaceId)
+  );
   if (childDocs.length > 0) {
     lines.push("", "---", "", "## Nested Child Pages");
     for (const child of childDocs) {
@@ -62,6 +71,7 @@ export function buildAgentContextMarkdown(
   const wikiTitles = extractWikiLinks(doc.content);
   const includedIds = new Set<string>([doc.id, ...childDocs.map((c) => c.id)]);
   const linkedDocs: BriefDocument[] = [];
+  const externalSpaceRefs: Array<{ title: string; spaceName: string }> = [];
 
   for (const rawTitle of wikiTitles) {
     const match = allDocs.find(
@@ -69,22 +79,36 @@ export function buildAgentContextMarkdown(
         !includedIds.has(d.id) &&
         d.title.trim().toLowerCase() === rawTitle.trim().toLowerCase()
     );
-    if (match) {
-      includedIds.add(match.id);
-      linkedDocs.push(match);
+    if (!match) continue;
+
+    if (sameSpaceOnly && match.spaceId !== doc.spaceId) {
+      externalSpaceRefs.push({
+        title: match.title || "Untitled",
+        spaceName: spaceMap.get(match.spaceId) ?? "Other Space",
+      });
+      continue;
     }
+
+    includedIds.add(match.id);
+    linkedDocs.push(match);
   }
 
   if (linkedDocs.length > 0) {
-    lines.push("", "---", "", "## Linked Documents");
+    lines.push("", "---", "", `## Linked Documents (${spaceName})`);
     for (const linked of linkedDocs) {
-      const linkedSpace = spaceMap.get(linked.spaceId) ?? "Space";
       lines.push(
         "",
-        `### [[${linked.title || "Untitled"}]] (${linkedSpace})`,
+        `### [[${linked.title || "Untitled"}]]`,
         "",
         linked.content.trim()
       );
+    }
+  }
+
+  if (externalSpaceRefs.length > 0) {
+    lines.push("", "---", "", "## Cross-Space References (Excluded from Context)");
+    for (const ref of externalSpaceRefs) {
+      lines.push(`- \`[[${ref.title}]]\` (${ref.spaceName})`);
     }
   }
 
@@ -96,6 +120,67 @@ export function buildAgentContextMarkdown(
   ].join("\n");
   const tickets = extractTicketIdentifiers(combinedContent);
 
+  if (tickets.length > 0) {
+    lines.push("", "---", "", "## Referenced Kanso Tickets");
+    for (const ticket of tickets) {
+      lines.push(`- \`#${ticket}\``);
+    }
+  }
+
+  return lines.join("\n").trim() + "\n";
+}
+
+export function buildSpaceContextMarkdown(
+  space: Space,
+  allDocs: BriefDocument[]
+): string {
+  const spaceDocs = allDocs.filter((d) => d.spaceId === space.id);
+  const spaceDocIds = new Set(spaceDocs.map((d) => d.id));
+  const childrenByParent = new Map<string | null, BriefDocument[]>();
+
+  for (const doc of spaceDocs) {
+    const parentKey =
+      doc.parentId && spaceDocIds.has(doc.parentId) ? doc.parentId : null;
+    const list = childrenByParent.get(parentKey) ?? [];
+    list.push(doc);
+    childrenByParent.set(parentKey, list);
+  }
+
+  const orderedDocs: Array<{ doc: BriefDocument; depth: number }> = [];
+  const visit = (parentId: string | null, depth: number) => {
+    const children = childrenByParent.get(parentId) ?? [];
+    for (const child of children) {
+      orderedDocs.push({ doc: child, depth });
+      visit(child.id, depth + 1);
+    }
+  };
+  visit(null, 0);
+
+  const lines: string[] = [
+    "---",
+    `space: "${space.name}"`,
+    `slug: "${space.slug}"`,
+    `document_count: ${orderedDocs.length}`,
+    "---",
+    "",
+    `# Space: ${space.name}`,
+  ];
+
+  for (const { doc, depth } of orderedDocs) {
+    const headingPrefix = "#".repeat(Math.min(2 + depth, 4));
+    lines.push(
+      "",
+      "---",
+      "",
+      `${headingPrefix} ${doc.title || "Untitled"}`,
+      "",
+      doc.content.trim()
+    );
+  }
+
+  const tickets = extractTicketIdentifiers(
+    orderedDocs.map((item) => item.doc.content).join("\n")
+  );
   if (tickets.length > 0) {
     lines.push("", "---", "", "## Referenced Kanso Tickets");
     for (const ticket of tickets) {

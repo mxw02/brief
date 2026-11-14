@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import {
+  Bot,
+  Check,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -20,6 +22,7 @@ interface SpaceSidebarProps {
   onCreateDoc: (spaceId: string, parentId?: string | null) => void;
   onDeleteDoc: (docId: string) => void;
   onCreateSpace: (name: string) => void;
+  onCopySpaceContext: (spaceId: string) => void;
 }
 
 interface TreeNodeProps {
@@ -149,10 +152,12 @@ export function SpaceSidebar({
   onCreateDoc,
   onDeleteDoc,
   onCreateSpace,
+  onCopySpaceContext,
 }: SpaceSidebarProps) {
   const [addingSpace, setAddingSpace] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState("");
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [copiedSpaceId, setCopiedSpaceId] = useState<string | null>(null);
 
   const expandedIds = useMemo(() => {
     const expanded = new Set<string>();
@@ -259,14 +264,32 @@ export function SpaceSidebar({
                     {spaceDocs.length}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onCreateDoc(space.id, null)}
-                  className="rounded p-0.5 text-zinc-400 opacity-75 transition-colors hover:bg-white hover:text-teal-700 group-hover:opacity-100"
-                  title={`New page in ${space.name}`}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex items-center gap-1 opacity-75 transition-opacity group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCopySpaceContext(space.id);
+                      setCopiedSpaceId(space.id);
+                      setTimeout(() => setCopiedSpaceId(null), 1800);
+                    }}
+                    className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-white hover:text-emerald-700"
+                    title={`Copy ${space.name} Space as Agent Context`}
+                  >
+                    {copiedSpaceId === space.id ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-700" />
+                    ) : (
+                      <Bot className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCreateDoc(space.id, null)}
+                    className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-white hover:text-teal-700"
+                    title={`New page in ${space.name}`}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-0.5">

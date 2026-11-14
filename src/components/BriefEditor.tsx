@@ -14,7 +14,10 @@ import {
   RotateCcw,
   Search,
 } from "lucide-react";
-import { buildAgentContextMarkdown } from "@/lib/agent-context";
+import {
+  buildAgentContextMarkdown,
+  buildSpaceContextMarkdown,
+} from "@/lib/agent-context";
 import { buildSearchIndex } from "@/lib/search-index";
 import { SLASH_COMMANDS } from "@/lib/slash-commands";
 import {
@@ -251,7 +254,9 @@ export function BriefEditor() {
   const handleCopyAgentContext = useCallback(async () => {
     if (!activeDoc) return;
     try {
-      const payload = buildAgentContextMarkdown(activeDoc, documents, spaces);
+      const payload = buildAgentContextMarkdown(activeDoc, documents, spaces, {
+        sameSpaceOnly: true,
+      });
       await navigator.clipboard.writeText(payload);
       setCopiedAgentContext(true);
       setTimeout(() => setCopiedAgentContext(false), 2000);
@@ -259,6 +264,20 @@ export function BriefEditor() {
       // Clipboard may be unavailable
     }
   }, [activeDoc, documents, spaces]);
+
+  const handleCopySpaceContext = useCallback(
+    async (spaceId: string) => {
+      const space = spaces.find((s) => s.id === spaceId);
+      if (!space) return;
+      try {
+        const payload = buildSpaceContextMarkdown(space, documents);
+        await navigator.clipboard.writeText(payload);
+      } catch {
+        // Clipboard may be unavailable
+      }
+    },
+    [documents, spaces]
+  );
 
   const searchIndex = useMemo(
     () => buildSearchIndex(documents, spaces),
@@ -339,11 +358,21 @@ export function BriefEditor() {
       {
         id: "doc-copy-agent-context",
         group: "Document",
-        label: "Copy as Agent Context",
-        description:
-          "Export page, nested child pages, [[linked]] docs & ticket refs as Markdown",
+        label: "Copy Page as Agent Context",
+        description: `Export page + same-space linked docs (${activeSpace?.name ?? "Space"})`,
         onRun: handleCopyAgentContext,
       },
+      ...(activeSpace
+        ? [
+            {
+              id: "space-copy-agent-context",
+              group: "Document" as const,
+              label: `Copy Space as Agent Context (${activeSpace.name})`,
+              description: `Export all documents in ${activeSpace.name} as Markdown`,
+              onRun: () => handleCopySpaceContext(activeSpace.id),
+            },
+          ]
+        : []),
       {
         id: "doc-copy",
         group: "Document",
@@ -365,11 +394,12 @@ export function BriefEditor() {
     ];
   }, [
     activeDoc,
-    activeSpace?.name,
+    activeSpace,
     documents,
     focusMode,
     handleCopyAgentContext,
     handleCopyDocument,
+    handleCopySpaceContext,
     handleCreateDoc,
     sidebarOpen,
     spaces,
@@ -553,6 +583,7 @@ export function BriefEditor() {
             }
             onDeleteDoc={handleDeleteDoc}
             onCreateSpace={handleCreateSpace}
+            onCopySpaceContext={handleCopySpaceContext}
           />
         )}
 
