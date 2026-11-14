@@ -1,18 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
+  Bot,
   Check,
   Command,
-  Copy,
   FilePlus2,
-  Maximize2,
   Minimize2,
   PanelLeft,
   RotateCcw,
   Search,
 } from "lucide-react";
+import {
+  buildAgentContextMarkdown,
+  buildSpaceContextMarkdown,
+} from "@/lib/agent-context";
 import { buildSearchIndex } from "@/lib/search-index";
 import { SLASH_COMMANDS } from "@/lib/slash-commands";
 import {
@@ -52,7 +54,7 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [copiedDoc, setCopiedDoc] = useState(false);
+  const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
 
@@ -238,12 +240,38 @@ export function BriefEditor() {
   const handleCopyDocument = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(`# ${title}\n\n${content}`);
-      setCopiedDoc(true);
-      setTimeout(() => setCopiedDoc(false), 1800);
     } catch {
       // Clipboard may be unavailable
     }
   }, [content, title]);
+
+  const handleCopyAgentContext = useCallback(async () => {
+    if (!activeDoc) return;
+    try {
+      const payload = buildAgentContextMarkdown(activeDoc, documents, spaces, {
+        sameSpaceOnly: true,
+      });
+      await navigator.clipboard.writeText(payload);
+      setCopiedAgentContext(true);
+      setTimeout(() => setCopiedAgentContext(false), 2000);
+    } catch {
+      // Clipboard may be unavailable
+    }
+  }, [activeDoc, documents, spaces]);
+
+  const handleCopySpaceContext = useCallback(
+    async (spaceId: string) => {
+      const space = spaces.find((s) => s.id === spaceId);
+      if (!space) return;
+      try {
+        const payload = buildSpaceContextMarkdown(space, documents);
+        await navigator.clipboard.writeText(payload);
+      } catch {
+        // Clipboard may be unavailable
+      }
+    },
+    [documents, spaces]
+  );
 
   const searchIndex = useMemo(
     () => buildSearchIndex(documents, spaces),
@@ -322,6 +350,24 @@ export function BriefEditor() {
         },
       },
       {
+        id: "doc-copy-agent-context",
+        group: "Document",
+        label: "Copy Page as Agent Context",
+        description: `Export page + same-space linked docs (${activeSpace?.name ?? "Space"})`,
+        onRun: handleCopyAgentContext,
+      },
+      ...(activeSpace
+        ? [
+            {
+              id: "space-copy-agent-context",
+              group: "Document" as const,
+              label: `Copy Space as Agent Context (${activeSpace.name})`,
+              description: `Export all documents in ${activeSpace.name} as Markdown`,
+              onRun: () => handleCopySpaceContext(activeSpace.id),
+            },
+          ]
+        : []),
+      {
         id: "doc-copy",
         group: "Document",
         label: "Copy Markdown",
@@ -342,10 +388,12 @@ export function BriefEditor() {
     ];
   }, [
     activeDoc,
-    activeSpace?.name,
+    activeSpace,
     documents,
     focusMode,
+    handleCopyAgentContext,
     handleCopyDocument,
+    handleCopySpaceContext,
     handleCreateDoc,
     sidebarOpen,
     spaces,
@@ -454,34 +502,22 @@ export function BriefEditor() {
 
               <button
                 type="button"
-                onClick={handleCopyDocument}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100/70"
-                title="Copy Markdown"
+                onClick={handleCopyAgentContext}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                title="Copy page + nested & [[linked]] docs as Agent Context"
               >
-                {copiedDoc ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                {copiedAgentContext ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-700" />
+                    <span className="hidden lg:inline">Copied Context</span>
+                  </>
                 ) : (
-                  <Copy className="h-3.5 w-3.5" />
+                  <>
+                    <Bot className="h-3.5 w-3.5" />
+                    <span className="hidden lg:inline">Copy Context</span>
+                  </>
                 )}
               </button>
-
-              <button
-                type="button"
-                onClick={() => setFocusMode(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-800"
-                title="Focus Mode (Cmd+\)"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Focus</span>
-              </button>
-
-              <Link
-                href="/api/health"
-                className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 xl:inline-flex"
-                title="Healthcheck"
-              >
-                <span className="h-2 w-2 rounded-full bg-emerald-600" />
-              </Link>
             </div>
           </div>
         </header>
@@ -510,6 +546,7 @@ export function BriefEditor() {
             }
             onDeleteDoc={handleDeleteDoc}
             onCreateSpace={handleCreateSpace}
+            onCopySpaceContext={handleCopySpaceContext}
           />
         )}
 
