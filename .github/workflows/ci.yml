@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for package.json
+        id: check-pkg
+        run: |
+          if [ -f "package.json" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json found yet — skipping Node.js checks." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Setup Node.js
+        if: steps.check-pkg.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        if: steps.check-pkg.outputs.exists == 'true'
+        run: |
+          if [ -f "pnpm-lock.yaml" ]; then
+            corepack enable
+            pnpm install --frozen-lockfile
+          elif [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run lint
+        if: steps.check-pkg.outputs.exists == 'true'
+        run: npm run lint --if-present
+
+      - name: Run typecheck
+        if: steps.check-pkg.outputs.exists == 'true'
+        run: npm run typecheck --if-present
+
+      - name: Run tests
+        if: steps.check-pkg.outputs.exists == 'true'
+        run: npm test --if-present
+
+      - name: Build
+        if: steps.check-pkg.outputs.exists == 'true'
+        run: npm run build --if-present

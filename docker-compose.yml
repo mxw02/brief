@@ -1,0 +1,38 @@
+services:
+  brief:
+    image: ghcr.io/mxw02/brief:${BRIEF_VERSION:-latest}
+    container_name: brief
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-brief}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-brief}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - brief_uploads:/app/uploads
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: brief-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brief}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-brief}
+    volumes:
+      - brief_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brief} -d ${POSTGRES_DB:-brief}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  brief_pgdata:
+  brief_uploads:
