@@ -6,7 +6,7 @@ const ISSUE_ID_RE = /^[A-Z][A-Z0-9]{1,9}-\d+$/;
 function getKansoBaseUrl(): string {
   return (
     process.env.KANSO_API_URL?.trim().replace(/\/+$/, "") ||
-    "http://192.168.178.45:3000"
+    "http://localhost:3000"
   );
 }
 
