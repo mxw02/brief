@@ -1,19 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, MessageSquare, RotateCcw, Trash2 } from "lucide-react";
+import {
+  CheckCircle2,
+  LocateFixed,
+  MessageSquare,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import type { InlineComment } from "@/lib/workspace";
 
 interface CommentsPanelProps {
   comments: InlineComment[];
   onToggleResolve: (commentId: string) => void;
   onDeleteComment: (commentId: string) => void;
+  onJumpToQuote?: (comment: InlineComment) => void;
 }
 
 export function CommentsPanel({
   comments,
   onToggleResolve,
   onDeleteComment,
+  onJumpToQuote,
 }: CommentsPanelProps) {
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
 
@@ -84,9 +92,15 @@ export function CommentsPanel({
               }`}
             >
               {comment.quote && (
-                <blockquote className="mb-2 border-l-2 border-teal-600/60 pl-2.5 text-xs italic text-zinc-500">
-                  &ldquo;{comment.quote}&rdquo;
-                </blockquote>
+                <button
+                  type="button"
+                  onClick={() => onJumpToQuote?.(comment)}
+                  className="group mb-2 flex w-full items-center justify-between gap-2 rounded-r-md border-l-2 border-teal-600/60 bg-teal-50/30 py-1 pl-2.5 pr-2 text-left text-xs italic text-zinc-600 transition-colors hover:border-teal-700 hover:bg-teal-50 hover:text-teal-900"
+                  title="Jump to highlighted text in document"
+                >
+                  <span className="line-clamp-2">&ldquo;{comment.quote}&rdquo;</span>
+                  <LocateFixed className="h-3 w-3 shrink-0 text-teal-700 opacity-60 transition-opacity group-hover:opacity-100" />
+                </button>
               )}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">

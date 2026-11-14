@@ -68,6 +68,8 @@ export function normalizeDocumentStatus(
 export interface InlineComment {
   id: string;
   quote: string;
+  from?: number;
+  to?: number;
   body: string;
   author: string;
   resolved: boolean;

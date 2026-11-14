@@ -42,6 +42,7 @@ const CustomCodeBlock = CodeBlockLowlight.extend({
 export interface RichDocumentEditorHandle {
   insertMarkdownSnippet: (snippet: string) => void;
   focus: () => void;
+  focusQuote: (quote: string, from?: number, to?: number) => boolean;
 }
 
 interface RichDocumentEditorProps {
@@ -52,7 +53,12 @@ interface RichDocumentEditorProps {
   onChangeMarkdown: (markdown: string) => void;
   onOpenOrCreateWikiLink: (targetTitle: string) => void;
   onCreateAndLinkDoc: (title: string) => void;
-  onAddInlineComment?: (quote: string, body: string) => void;
+  onAddInlineComment?: (
+    quote: string,
+    body: string,
+    from?: number,
+    to?: number
+  ) => void;
 }
 
 interface TriggerState {
@@ -99,6 +105,8 @@ export const RichDocumentEditor = forwardRef<
 
   const [selectionComment, setSelectionComment] = useState<{
     quote: string;
+    from: number;
+    to: number;
     top: number;
     left: number;
     composing: boolean;
@@ -310,6 +318,8 @@ export const RichDocumentEditor = forwardRef<
               ? prev
               : {
                   quote: selectedText.slice(0, 140),
+                  from,
+                  to,
                   top: Math.max(8, coords.top - 64),
                   left: Math.min(coords.left, 420),
                   composing: false,
@@ -437,6 +447,47 @@ export const RichDocumentEditor = forwardRef<
       focus: () => {
         editor?.commands.focus();
       },
+      focusQuote: (quote: string, from?: number, to?: number) => {
+        if (!editor) return false;
+        const doc = editor.state.doc;
+        let matchFrom = -1;
+        let matchTo = -1;
+
+        if (
+          typeof from === "number" &&
+          typeof to === "number" &&
+          from >= 0 &&
+          to <= doc.content.size &&
+          doc.textBetween(from, to, " ").trim() === quote.trim()
+        ) {
+          matchFrom = from;
+          matchTo = to;
+        } else if (quote.trim()) {
+          const needle = quote.trim().toLowerCase();
+          doc.descendants((node, pos) => {
+            if (matchFrom !== -1) return false;
+            if (!node.isText || !node.text) return true;
+            const idx = node.text.toLowerCase().indexOf(needle);
+            if (idx !== -1) {
+              matchFrom = pos + idx;
+              matchTo = matchFrom + needle.length;
+              return false;
+            }
+            return true;
+          });
+        }
+
+        if (matchFrom === -1 || matchTo === -1) return false;
+
+        editor.chain().focus().setTextSelection({ from: matchFrom, to: matchTo }).run();
+        const domAt = editor.view.domAtPos(matchFrom);
+        const el =
+          domAt.node instanceof HTMLElement
+            ? domAt.node
+            : domAt.node.parentElement;
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return true;
+      },
     }),
     [editor]
   );
@@ -470,7 +521,12 @@ export const RichDocumentEditor = forwardRef<
                 e.preventDefault();
                 const text = selectionComment.draft.trim();
                 if (!text) return;
-                onAddInlineComment(selectionComment.quote, text);
+                onAddInlineComment(
+                  selectionComment.quote,
+                  text,
+                  selectionComment.from,
+                  selectionComment.to
+                );
                 setSelectionComment(null);
               }}
               className="w-72 p-2.5"

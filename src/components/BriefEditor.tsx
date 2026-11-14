@@ -523,11 +523,13 @@ export function BriefEditor() {
   );
 
   const handleAddInlineComment = useCallback(
-    (quote: string, body: string) => {
+    (quote: string, body: string, from?: number, to?: number) => {
       if (!activeDoc) return;
       const comment: InlineComment = {
         id: makeId("cmt"),
         quote,
+        ...(typeof from === "number" ? { from } : {}),
+        ...(typeof to === "number" ? { to } : {}),
         body,
         author: "Author",
         resolved: false,
@@ -884,6 +886,13 @@ export function BriefEditor() {
               comments={activeDoc?.comments ?? []}
               onToggleResolve={handleToggleResolveComment}
               onDeleteComment={handleDeleteComment}
+              onJumpToQuote={(comment) => {
+                richEditorRef.current?.focusQuote(
+                  comment.quote,
+                  comment.from,
+                  comment.to
+                );
+              }}
             />
 
             <BacklinksPanel
