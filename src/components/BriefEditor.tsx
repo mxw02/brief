@@ -6,11 +6,16 @@ import {
   Check,
   Command,
   FilePlus2,
+  Lock,
+  LogOut,
   MessageSquare,
   Minimize2,
   PanelLeft,
+  RefreshCw,
   RotateCcw,
   Search,
+  User,
+  Users,
 } from "lucide-react";
 import {
   buildAgentContextMarkdown,
@@ -30,9 +35,11 @@ import {
   type BriefDocument,
   type DocumentStatus,
   type InlineComment,
+  type PublicUser,
   type Space,
 } from "@/lib/workspace";
 import { AgentMcpModal } from "./AgentMcpModal";
+import { AuthScreen } from "./AuthScreen";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { CommentsPanel } from "./CommentsPanel";
@@ -44,6 +51,7 @@ import {
 } from "./RichDocumentEditor";
 import { SearchModal } from "./SearchModal";
 import { SpaceSidebar } from "./SpaceSidebar";
+import { TeamAccessModal } from "./TeamAccessModal";
 
 const STORAGE_WORKSPACE_KEY = "brief:workspace:v2";
 
@@ -66,41 +74,84 @@ export function BriefEditor() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
+
+  const [authLoading, setAuthLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
   const hydratedRef = useRef(false);
   const lastServerSyncRef = useRef<string>("");
 
-  // Restore persisted workspace on mount and sync with server store (for agent Spaces & Drafts)
-  useEffect(() => {
+  const loadWorkspaceForUser = useCallback(async () => {
+    hydratedRef.current = false;
+    setWorkspaceLoading(true);
     try {
-      const raw = localStorage.getItem(STORAGE_WORKSPACE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as {
-          spaces?: Space[];
-          documents?: BriefDocument[];
-          activeDocId?: string;
-        };
-        if (parsed.spaces?.length && parsed.documents?.length) {
-          setSpaces(parsed.spaces);
-          setDocuments(
-            parsed.documents.map((d) => ({ ...d, parentId: d.parentId ?? null }))
-          );
-          if (
-            parsed.activeDocId &&
-            parsed.documents.some((d) => d.id === parsed.activeDocId)
-          ) {
-            setActiveDocId(parsed.activeDocId);
-          } else {
-            setActiveDocId(parsed.documents[0].id);
-          }
-        }
-      }
+      const res = await fetch("/api/workspace");
+      if (!res.ok) return;
+      const serverData = (await res.json()) as {
+        spaces?: Space[];
+        documents?: BriefDocument[];
+      };
+      const nextSpaces = Array.isArray(serverData.spaces)
+        ? serverData.spaces
+        : [];
+      const nextDocs = Array.isArray(serverData.documents)
+        ? serverData.documents.map((d) => ({
+            ...d,
+            parentId: d.parentId ?? null,
+          }))
+        : [];
+      setSpaces(nextSpaces);
+      setDocuments(nextDocs);
+      lastServerSyncRef.current = JSON.stringify({
+        spaces: nextSpaces,
+        documents: nextDocs,
+      });
+      setActiveDocId((prev) =>
+        nextDocs.some((d) => d.id === prev) ? prev : (nextDocs[0]?.id ?? "")
+      );
     } catch {
-      // Ignore storage errors
+      // Ignore network errors
+    } finally {
+      hydratedRef.current = true;
+      setWorkspaceLoading(false);
     }
+  }, []);
 
+  useEffect(() => {
+    let active = true;
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/auth/session");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user?: PublicUser | null;
+          needsSetup?: boolean;
+        };
+        if (!active) return;
+        setNeedsSetup(Boolean(data.needsSetup));
+        setCurrentUser(data.user ?? null);
+        if (data.user) {
+          await loadWorkspaceForUser();
+        }
+      } catch {
+        // Ignore
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    };
+    void checkSession();
+    return () => {
+      active = false;
+    };
+  }, [loadWorkspaceForUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     const syncFromServer = async () => {
       try {
         const res = await fetch("/api/workspace");
@@ -109,16 +160,10 @@ export function BriefEditor() {
           spaces?: Space[];
           documents?: BriefDocument[];
         };
-        if (serverData.spaces?.length) {
-          setSpaces((prev) => {
-            const localIds = new Set(prev.map((s) => s.id));
-            const newSpaces = serverData.spaces!.filter(
-              (s) => !localIds.has(s.id)
-            );
-            return newSpaces.length > 0 ? [...prev, ...newSpaces] : prev;
-          });
+        if (serverData.spaces) {
+          setSpaces(serverData.spaces);
         }
-        if (serverData.documents?.length) {
+        if (serverData.documents) {
           setDocuments((prev) => {
             const localIds = new Set(prev.map((d) => d.id));
             const newDrafts = serverData.documents!.filter(
@@ -129,23 +174,16 @@ export function BriefEditor() {
         }
       } catch {
         // Ignore background sync errors
-      } finally {
-        hydratedRef.current = true;
       }
     };
 
-    syncFromServer();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
-        syncFromServer();
+        void syncFromServer();
       }
-    }, 4000);
-    window.addEventListener("focus", syncFromServer);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", syncFromServer);
-    };
-  }, []);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
 
   useEffect(() => {
     try {
@@ -157,7 +195,9 @@ export function BriefEditor() {
       // Ignore storage errors
     }
 
-    if (!hydratedRef.current) return;
+    if (!hydratedRef.current || !currentUser || currentUser.role === "viewer") {
+      return;
+    }
     const payload = JSON.stringify({ spaces, documents });
     if (payload === lastServerSyncRef.current) return;
 
@@ -170,7 +210,7 @@ export function BriefEditor() {
       }).catch(() => undefined);
     }, 600);
     return () => clearTimeout(timer);
-  }, [spaces, documents, activeDocId]);
+  }, [spaces, documents, activeDocId, currentUser]);
 
   const activeDoc = useMemo(
     () => documents.find((d) => d.id === activeDocId) ?? documents[0],
@@ -193,14 +233,23 @@ export function BriefEditor() {
 
   const updateActiveDoc = useCallback(
     (patch: Partial<Pick<BriefDocument, "title" | "content" | "status">>) => {
+      if (currentUser?.role === "viewer") return;
       const now = new Date().toISOString();
       setDocuments((prev) =>
         prev.map((doc) =>
-          doc.id === activeDoc?.id ? { ...doc, ...patch, updatedAt: now } : doc
+          doc.id === activeDoc?.id
+            ? {
+                ...doc,
+                ...patch,
+                updatedAt: now,
+                lastEditedBy: currentUser?.name ?? doc.lastEditedBy,
+                lastEditedByType: "human",
+              }
+            : doc
         )
       );
     },
-    [activeDoc?.id]
+    [activeDoc?.id, currentUser]
   );
 
   // Global keyboard shortcuts (Cmd/Ctrl+K, Cmd/Ctrl+P, Cmd/Ctrl+Shift+F, Cmd/Ctrl+\)
@@ -597,6 +646,92 @@ export function BriefEditor() {
     return { words, chars, readingMinutes };
   }, [content]);
 
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9F9F8] text-sm text-zinc-500">
+        Lade Brief Workspace...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        needsSetup={needsSetup}
+        onAuthenticated={(user) => {
+          setNeedsSetup(false);
+          setCurrentUser(user);
+          void loadWorkspaceForUser();
+        }}
+      />
+    );
+  }
+
+  if (workspaceLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9F9F8] text-sm text-zinc-500">
+        Lade freigegebene Spaces...
+      </div>
+    );
+  }
+
+  if (spaces.length === 0 && currentUser.role !== "admin") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F9F9F8] px-4 py-12">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-7 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h1 className="text-lg font-semibold text-zinc-900">
+            Noch kein Zugriff auf einen Space
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+            Du bist als{" "}
+            <span className="font-medium text-zinc-900">
+              {currentUser.name}
+            </span>{" "}
+            ({currentUser.email}) angemeldet, aber dir wurde noch kein Space
+            freigegeben. Bitte wende dich an deinen Administrator, damit er dir
+            Zugriff auf die benötigten Spaces erteilt.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch("/api/auth/session");
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    user?: PublicUser | null;
+                  };
+                  if (data.user) setCurrentUser(data.user);
+                }
+                await loadWorkspaceForUser();
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-teal-700 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-teal-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Zugriff erneut prüfen
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                setCurrentUser(null);
+                hydratedRef.current = false;
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Abmelden
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isViewer = currentUser.role === "viewer";
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900">
       {!focusMode && (
@@ -707,6 +842,42 @@ export function BriefEditor() {
                   </>
                 )}
               </button>
+
+              {currentUser?.role === "admin" && (
+                <button
+                  type="button"
+                  onClick={() => setTeamModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                  title="Team, Rollen & Space-Zugriff"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span className="hidden xl:inline">Team &amp; Rechte</span>
+                </button>
+              )}
+
+              {currentUser && (
+                <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700">
+                  <User className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="hidden sm:inline font-medium">
+                    {currentUser.name}
+                  </span>
+                  <span className="rounded bg-zinc-200/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-zinc-700">
+                    {currentUser.role}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch("/api/auth/logout", { method: "POST" });
+                      setCurrentUser(null);
+                      hydratedRef.current = false;
+                    }}
+                    className="ml-0.5 rounded p-0.5 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-800"
+                    title="Abmelden"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -840,6 +1011,30 @@ export function BriefEditor() {
                     </div>
                   );
                 })()}
+                {(activeDoc?.lastEditedBy || activeDoc?.proposedBy) && (
+                  <span
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
+                      activeDoc?.lastEditedByType === "agent" ||
+                      Boolean(activeDoc?.proposedBy)
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-zinc-200 bg-zinc-100 text-zinc-700"
+                    }`}
+                    title={
+                      activeDoc?.lastEditedByType === "agent" ||
+                      Boolean(activeDoc?.proposedBy)
+                        ? "Bearbeitet durch Agent-Bot"
+                        : "Bearbeitet durch Mensch"
+                    }
+                  >
+                    {activeDoc?.lastEditedByType === "agent" ||
+                    Boolean(activeDoc?.proposedBy) ? (
+                      <Bot className="h-3 w-3 text-emerald-700" />
+                    ) : (
+                      <User className="h-3 w-3 text-zinc-700" />
+                    )}
+                    {activeDoc?.lastEditedBy || activeDoc?.proposedBy}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -874,6 +1069,7 @@ export function BriefEditor() {
               content={parsedFrontmatter.body}
               documents={documents}
               spaces={spaces}
+              readOnly={isViewer}
               onChangeMarkdown={(md) =>
                 updateActiveDoc({
                   content: serializeFrontmatter(parsedFrontmatter.metadata, md),
@@ -969,6 +1165,16 @@ export function BriefEditor() {
         open={mcpModalOpen}
         onClose={() => setMcpModalOpen(false)}
       />
+
+      {currentUser && (
+        <TeamAccessModal
+          open={teamModalOpen}
+          currentUser={currentUser}
+          spaces={spaces}
+          onClose={() => setTeamModalOpen(false)}
+          onUserUpdated={(updated) => setCurrentUser(updated)}
+        />
+      )}
     </div>
   );
 }

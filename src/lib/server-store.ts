@@ -155,6 +155,8 @@ export async function proposeAgentDraft(
     proposedBy: input.proposedBy.trim() || "AI Agent",
     proposalTargetId: targetDoc?.id,
     proposalSummary: input.summary?.trim() || undefined,
+    lastEditedBy: input.proposedBy.trim() || "AI Agent",
+    lastEditedByType: "agent",
   };
 
   await dbInsertDocument(draft);

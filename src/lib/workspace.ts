@@ -65,6 +65,19 @@ export function normalizeDocumentStatus(
   return "approved";
 }
 
+export type UserRole = "admin" | "editor" | "viewer" | "agent_bot";
+export type AuthorType = "human" | "agent";
+
+export interface PublicUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  allSpaces: boolean;
+  spaceIds: string[];
+  createdAt: string;
+}
+
 export interface InlineComment {
   id: string;
   quote: string;
@@ -72,6 +85,7 @@ export interface InlineComment {
   to?: number;
   body: string;
   author: string;
+  authorType?: AuthorType;
   resolved: boolean;
   createdAt: string;
 }
@@ -87,6 +101,8 @@ export interface BriefDocument {
   proposedBy?: string;
   proposalTargetId?: string;
   proposalSummary?: string;
+  lastEditedBy?: string | null;
+  lastEditedByType?: AuthorType | null;
   comments?: InlineComment[];
 }
 

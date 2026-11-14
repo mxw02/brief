@@ -108,6 +108,7 @@ interface RichDocumentEditorProps {
   content: string;
   documents: BriefDocument[];
   spaces: Space[];
+  readOnly?: boolean;
   onChangeMarkdown: (markdown: string) => void;
   onOpenOrCreateWikiLink: (targetTitle: string) => void;
   onCreateAndLinkDoc: (title: string) => void;
@@ -145,6 +146,7 @@ export const RichDocumentEditor = forwardRef<
     content,
     documents,
     spaces,
+    readOnly = false,
     onChangeMarkdown,
     onOpenOrCreateWikiLink,
     onCreateAndLinkDoc,
@@ -315,6 +317,7 @@ export const RichDocumentEditor = forwardRef<
 
   const editor = useEditor({
     immediatelyRender: false,
+    editable: !readOnly,
     extensions: [
       StarterKit.configure({
         codeBlock: false,
@@ -465,6 +468,12 @@ export const RichDocumentEditor = forwardRef<
       detectTriggers(ed);
     },
   });
+
+  useEffect(() => {
+    if (editor && editor.isEditable !== !readOnly) {
+      editor.setEditable(!readOnly);
+    }
+  }, [editor, readOnly]);
 
   const getCursorCoords = useCallback(
     (pos: number): { top: number; left: number } => {
