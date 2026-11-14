@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Check,
-  Code2,
   Command,
   Copy,
   FilePlus2,
@@ -47,7 +46,6 @@ export function BriefEditor() {
     DEFAULT_DOCUMENTS[0].id
   );
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showMarkdownSource, setShowMarkdownSource] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copiedDoc, setCopiedDoc] = useState(false);
@@ -152,7 +150,6 @@ export function BriefEditor() {
       };
       setDocuments((prev) => [...prev, newDoc]);
       setActiveDocId(newDoc.id);
-      setShowMarkdownSource(false);
     },
     []
   );
@@ -258,15 +255,6 @@ export function BriefEditor() {
         onRun: () => setSidebarOpen((prev) => !prev),
       },
       {
-        id: "toggle-source",
-        group: "View",
-        label: showMarkdownSource
-          ? "Back to Rich Document"
-          : "View Raw Markdown",
-        description: "Inspect or copy underlying Markdown",
-        onRun: () => setShowMarkdownSource((prev) => !prev),
-      },
-      {
         id: "toggle-focus",
         group: "View",
         label: focusMode ? "Exit Focus Mode" : "Enter Focus Mode",
@@ -286,7 +274,6 @@ export function BriefEditor() {
         description: cmd.description,
         shortcut: cmd.shortcut,
         onRun: () => {
-          setShowMarkdownSource(false);
           richEditorRef.current?.insertMarkdownSnippet(cmd.snippet);
         },
       })),
@@ -334,7 +321,6 @@ export function BriefEditor() {
     focusMode,
     handleCopyDocument,
     handleCreateDoc,
-    showMarkdownSource,
     sidebarOpen,
     spaces,
     title,
@@ -349,7 +335,7 @@ export function BriefEditor() {
   }, [content]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-50 text-zinc-900">
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900">
       {!focusMode && (
         <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white px-4 py-2.5 sm:px-6">
           <div className="flex items-center justify-between gap-4">
@@ -425,20 +411,6 @@ export function BriefEditor() {
                 <kbd className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] text-zinc-500">
                   ⌘K
                 </kbd>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowMarkdownSource((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  showMarkdownSource
-                    ? "border-teal-200 bg-teal-50 text-teal-700"
-                    : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100/70"
-                }`}
-                title="Inspect raw Markdown"
-              >
-                <Code2 className="h-3.5 w-3.5" />
-                <span className="hidden lg:inline">MD</span>
               </button>
 
               <button
@@ -527,22 +499,16 @@ export function BriefEditor() {
               </button>
             </div>
 
-            {showMarkdownSource ? (
-              <pre className="flex-1 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50 p-5 font-mono text-[13px] leading-relaxed text-zinc-700">
-                {`# ${title}\n\n${content}`}
-              </pre>
-            ) : (
-              <RichDocumentEditor
-                ref={richEditorRef}
-                docId={activeDoc?.id ?? "default"}
-                content={content}
-                documents={documents}
-                spaces={spaces}
-                onChangeMarkdown={(md) => updateActiveDoc({ content: md })}
-                onOpenOrCreateWikiLink={handleOpenOrCreateWikiLink}
-                onCreateAndLinkDoc={handleCreateAndLinkDoc}
-              />
-            )}
+            <RichDocumentEditor
+              ref={richEditorRef}
+              docId={activeDoc?.id ?? "default"}
+              content={content}
+              documents={documents}
+              spaces={spaces}
+              onChangeMarkdown={(md) => updateActiveDoc({ content: md })}
+              onOpenOrCreateWikiLink={handleOpenOrCreateWikiLink}
+              onCreateAndLinkDoc={handleCreateAndLinkDoc}
+            />
 
             <BacklinksPanel
               backlinks={backlinks}

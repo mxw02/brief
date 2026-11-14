@@ -10,6 +10,7 @@ function ensureMermaidInit() {
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
+    suppressErrorRendering: true,
     theme: "base",
     themeVariables: {
       fontFamily: "ui-sans-serif, system-ui, sans-serif",
@@ -47,7 +48,8 @@ export function MermaidDiagram({ chart }: MermaidDiagramProps) {
     ensureMermaidInit();
 
     mermaid
-      .render(diagramId, trimmed)
+      .parse(trimmed)
+      .then(() => mermaid.render(diagramId, trimmed))
       .then(({ svg: renderedSvg }) => {
         if (!cancelled) {
           setSvg(renderedSvg);

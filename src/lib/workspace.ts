@@ -58,7 +58,7 @@ export interface BriefDocument {
 
 \`\`\`mermaid
 flowchart LR
-  Author[Human / Agent] -->|Markdown + [[Links]]| Editor[Brief Editor]
+  Author[Human / Agent] -->|Markdown & Links| Editor[Brief Editor]
   Editor -->|Sync| DB[(PostgreSQL / SQLite)]
   Editor -->|Link| Kanso[Kanso Board BRIE]
 \`\`\`
