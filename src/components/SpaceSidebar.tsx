@@ -12,7 +12,14 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import type { BriefDocument, Space } from "@/lib/workspace";
+import {
+  normalizeDocumentStatus,
+  SPEC_STATUS_META,
+  SPEC_STATUSES,
+  type BriefDocument,
+  type DocumentStatus,
+  type Space,
+} from "@/lib/workspace";
 
 interface SpaceSidebarProps {
   spaces: Space[];
@@ -97,11 +104,22 @@ function DocumentTreeNode({
             <span className="truncate text-xs font-medium">
               {doc.title || "Untitled"}
             </span>
-            {doc.status === "draft" && (
-              <span className="ml-auto shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-800">
-                Draft
-              </span>
-            )}
+            {(() => {
+              const status = normalizeDocumentStatus(doc.status);
+              const meta = SPEC_STATUS_META[status];
+              return status === "approved" ? (
+                <span
+                  className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${meta.dotClass}`}
+                  title={meta.label}
+                />
+              ) : (
+                <span
+                  className={`ml-auto shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${meta.badgeClass}`}
+                >
+                  {meta.shortLabel}
+                </span>
+              );
+            })()}
           </button>
         </div>
 
@@ -163,6 +181,7 @@ export function SpaceSidebar({
 }: SpaceSidebarProps) {
   const [addingSpace, setAddingSpace] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState("");
+  const [statusFilter, setStatusFilter] = useState<DocumentStatus | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [copiedSpaceId, setCopiedSpaceId] = useState<string | null>(null);
 
@@ -209,6 +228,40 @@ export function SpaceSidebar({
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-1 border-b border-zinc-200/80 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setStatusFilter(null)}
+          className={`rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+            statusFilter === null
+              ? "border-teal-200 bg-teal-50 text-teal-800"
+              : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900"
+          }`}
+        >
+          All
+        </button>
+        {SPEC_STATUSES.map((st) => {
+          const meta = SPEC_STATUS_META[st];
+          const active = statusFilter === st;
+          return (
+            <button
+              key={st}
+              type="button"
+              onClick={() => setStatusFilter(active ? null : st)}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                active
+                  ? meta.badgeClass
+                  : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900"
+              }`}
+              title={`Filter by ${meta.label}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+              {meta.shortLabel}
+            </button>
+          );
+        })}
+      </div>
+
       {addingSpace && (
         <form
           onSubmit={handleAddSpace}
@@ -245,7 +298,14 @@ export function SpaceSidebar({
 
       <nav className="flex-1 space-y-5 overflow-y-auto p-3" aria-label="Spaces">
         {spaces.map((space) => {
-          const spaceDocs = documents.filter((d) => d.spaceId === space.id);
+          const spaceDocs = documents.filter((d) => {
+            if (d.spaceId !== space.id) return false;
+            if (statusFilter && normalizeDocumentStatus(d.status) !== statusFilter) {
+              return false;
+            }
+            return true;
+          });
+          if (statusFilter && spaceDocs.length === 0) return null;
           const spaceDocIds = new Set(spaceDocs.map((d) => d.id));
           const childrenByParent = new Map<string | null, BriefDocument[]>();
 

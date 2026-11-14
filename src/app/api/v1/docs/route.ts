@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireAgentAuth } from "@/lib/agent-auth";
 import { buildSearchIndex, searchDocuments } from "@/lib/search-index";
 import { isAdrOrSpecDocument, readWorkspaceStore } from "@/lib/server-store";
+import { normalizeDocumentStatus, SPEC_STATUSES } from "@/lib/workspace";
 
 export async function GET(request: NextRequest) {
   const auth = await requireAgentAuth(request);
@@ -35,10 +36,14 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  if (statusFilter === "draft" || statusFilter === "published") {
-    filtered = filtered.filter(
-      (doc) => (doc.status ?? "published") === statusFilter
-    );
+  if (statusFilter) {
+    const normalizedFilter =
+      statusFilter === "published" ? "approved" : statusFilter;
+    if (SPEC_STATUSES.includes(normalizedFilter as (typeof SPEC_STATUSES)[number])) {
+      filtered = filtered.filter(
+        (doc) => normalizeDocumentStatus(doc.status) === normalizedFilter
+      );
+    }
   }
 
   if (typeFilter === "adr" || typeFilter === "spec") {
@@ -53,7 +58,7 @@ export async function GET(request: NextRequest) {
       spaceId: doc.spaceId,
       spaceName: spaceMap.get(doc.spaceId)?.name ?? "Space",
       parentId: doc.parentId,
-      status: doc.status ?? "published",
+      status: normalizeDocumentStatus(doc.status),
       proposedBy: doc.proposedBy ?? null,
       proposalTargetId: doc.proposalTargetId ?? null,
       updatedAt: doc.updatedAt,

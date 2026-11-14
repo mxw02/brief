@@ -4,7 +4,53 @@ export interface Space {
   slug: string;
 }
 
-export type DocumentStatus = "published" | "draft";
+export type DocumentStatus = "draft" | "in_review" | "approved" | "outdated";
+
+export const SPEC_STATUSES: DocumentStatus[] = [
+  "draft",
+  "in_review",
+  "approved",
+  "outdated",
+];
+
+export const SPEC_STATUS_META: Record<
+  DocumentStatus,
+  { label: string; shortLabel: string; badgeClass: string; dotClass: string }
+> = {
+  draft: {
+    label: "Draft",
+    shortLabel: "Draft",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-800",
+    dotClass: "bg-amber-500",
+  },
+  in_review: {
+    label: "In Review",
+    shortLabel: "Review",
+    badgeClass: "border-sky-200 bg-sky-50 text-sky-800",
+    dotClass: "bg-sky-500",
+  },
+  approved: {
+    label: "Approved",
+    shortLabel: "Approved",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    dotClass: "bg-emerald-600",
+  },
+  outdated: {
+    label: "Outdated",
+    shortLabel: "Outdated",
+    badgeClass: "border-zinc-300 bg-zinc-100 text-zinc-600",
+    dotClass: "bg-zinc-400",
+  },
+};
+
+export function normalizeDocumentStatus(
+  status?: string | null
+): DocumentStatus {
+  if (status === "draft") return "draft";
+  if (status === "in_review") return "in_review";
+  if (status === "outdated") return "outdated";
+  return "approved";
+}
 
 export interface BriefDocument {
   id: string;
