@@ -37,6 +37,7 @@ import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { CommentsPanel } from "./CommentsPanel";
 import { FrontmatterBar } from "./FrontmatterBar";
+import { KansoEmbedsPanel } from "./KansoEmbedsPanel";
 import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
@@ -881,6 +882,8 @@ export function BriefEditor() {
               onCreateAndLinkDoc={handleCreateAndLinkDoc}
               onAddInlineComment={handleAddInlineComment}
             />
+
+            <KansoEmbedsPanel content={content} />
 
             <CommentsPanel
               comments={activeDoc?.comments ?? []}
