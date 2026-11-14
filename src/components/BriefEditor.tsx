@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
+  Bot,
   Check,
   Command,
   Copy,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
   Search,
 } from "lucide-react";
+import { buildAgentContextMarkdown } from "@/lib/agent-context";
 import { buildSearchIndex } from "@/lib/search-index";
 import { SLASH_COMMANDS } from "@/lib/slash-commands";
 import {
@@ -53,6 +55,7 @@ export function BriefEditor() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [copiedDoc, setCopiedDoc] = useState(false);
+  const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
 
@@ -245,6 +248,18 @@ export function BriefEditor() {
     }
   }, [content, title]);
 
+  const handleCopyAgentContext = useCallback(async () => {
+    if (!activeDoc) return;
+    try {
+      const payload = buildAgentContextMarkdown(activeDoc, documents, spaces);
+      await navigator.clipboard.writeText(payload);
+      setCopiedAgentContext(true);
+      setTimeout(() => setCopiedAgentContext(false), 2000);
+    } catch {
+      // Clipboard may be unavailable
+    }
+  }, [activeDoc, documents, spaces]);
+
   const searchIndex = useMemo(
     () => buildSearchIndex(documents, spaces),
     [documents, spaces]
@@ -322,6 +337,14 @@ export function BriefEditor() {
         },
       },
       {
+        id: "doc-copy-agent-context",
+        group: "Document",
+        label: "Copy as Agent Context",
+        description:
+          "Export page, nested child pages, [[linked]] docs & ticket refs as Markdown",
+        onRun: handleCopyAgentContext,
+      },
+      {
         id: "doc-copy",
         group: "Document",
         label: "Copy Markdown",
@@ -345,6 +368,7 @@ export function BriefEditor() {
     activeSpace?.name,
     documents,
     focusMode,
+    handleCopyAgentContext,
     handleCopyDocument,
     handleCreateDoc,
     sidebarOpen,
@@ -450,6 +474,25 @@ export function BriefEditor() {
                 <kbd className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] text-zinc-500">
                   ⌘K
                 </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyAgentContext}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                title="Copy page + nested & [[linked]] docs as Agent Context"
+              >
+                {copiedAgentContext ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-700" />
+                    <span className="hidden lg:inline">Copied Context</span>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="h-3.5 w-3.5" />
+                    <span className="hidden lg:inline">Agent Context</span>
+                  </>
+                )}
               </button>
 
               <button
