@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, KanbanSquare, RefreshCw, User } from "lucide-react";
 import {
   extractKansoTicketRefs,
@@ -18,32 +18,81 @@ export function KansoEmbedsPanel({ content }: KansoEmbedsPanelProps) {
 
   const [issues, setIssues] = useState<KansoIssueSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const requestSeqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchIssues = useCallback(async (idsKey: string) => {
+    abortRef.current?.abort();
+
     if (!idsKey) {
       setIssues([]);
+      setLoading(false);
       return;
     }
+
+    const seq = ++requestSeqRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
+
     try {
       const res = await fetch(
-        `/api/kanso/issues?ids=${encodeURIComponent(idsKey)}`
+        `/api/kanso/issues?ids=${encodeURIComponent(idsKey)}`,
+        { signal: controller.signal }
       );
       if (!res.ok) return;
       const data = (await res.json()) as { issues?: KansoIssueSummary[] };
-      if (Array.isArray(data.issues)) {
+      if (seq === requestSeqRef.current && Array.isArray(data.issues)) {
         setIssues(data.issues);
       }
     } catch {
-      // Ignore transient network failures
+      // Ignore aborts and transient network failures
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchIssues(refsKey);
+    if (!refsKey) {
+      fetchIssues("");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void fetchIssues(refsKey);
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      abortRef.current?.abort();
+    };
   }, [refsKey, fetchIssues]);
+
+  const issuesById = useMemo(() => {
+    const map = new Map<string, KansoIssueSummary>();
+    for (const issue of issues) {
+      map.set(issue.identifier.toUpperCase(), issue);
+    }
+    return map;
+  }, [issues]);
+
+  const displayedIssues = useMemo(
+    () =>
+      refs.map(
+        (id) =>
+          issuesById.get(id) ?? {
+            identifier: id,
+            title: "Loading...",
+            status: "TODO",
+            priority: "MEDIUM",
+            assigneeName: null,
+            assigneeType: null,
+            url: "#",
+            found: false,
+          }
+      ),
+    [refs, issuesById]
+  );
 
   if (refs.length === 0) return null;
 
@@ -67,19 +116,7 @@ export function KansoEmbedsPanel({ content }: KansoEmbedsPanelProps) {
       </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2">
-        {(issues.length > 0
-          ? issues
-          : refs.map((id) => ({
-              identifier: id,
-              title: "Loading...",
-              status: "TODO",
-              priority: "MEDIUM",
-              assigneeName: null,
-              assigneeType: null,
-              url: "#",
-              found: false,
-            }))
-        ).map((issue) => {
+        {displayedIssues.map((issue) => {
           const statusMeta =
             KANSO_STATUS_META[issue.status] ?? KANSO_STATUS_META.BACKLOG;
           return (

@@ -14,6 +14,10 @@ import {
   ReactNodeViewRenderer,
   useEditor,
 } from "@tiptap/react";
+import { Extension } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
@@ -37,6 +41,57 @@ const CustomCodeBlock = CodeBlockLowlight.extend({
 }).configure({
   lowlight,
   defaultLanguage: "typescript",
+});
+
+const KANSO_INLINE_TICKET_RE = /(?:^|[\s(])(#([A-Z][A-Z0-9]{1,9}-\d+))\b/g;
+
+function createKansoTicketDecorations(doc: ProseMirrorNode): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
+    if (node.type.name === "codeBlock") return false;
+    if (!node.isText || !node.text) return true;
+    if (node.marks.some((mark) => mark.type.name === "code")) return true;
+
+    KANSO_INLINE_TICKET_RE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = KANSO_INLINE_TICKET_RE.exec(node.text)) !== null) {
+      const fullMatch = match[0];
+      const chipText = match[1];
+      const ticketId = match[2];
+      const chipOffset = fullMatch.length - chipText.length;
+      const from = pos + match.index + chipOffset;
+      const to = from + chipText.length;
+      decorations.push(
+        Decoration.inline(from, to, {
+          class: "kanso-ticket-chip",
+          "data-kanso-ticket": ticketId,
+        })
+      );
+    }
+    return true;
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+const KansoTicketHighlight = Extension.create({
+  name: "kansoTicketHighlight",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey("kansoTicketHighlight"),
+        state: {
+          init: (_, state) => createKansoTicketDecorations(state.doc),
+          apply: (tr, oldSet) =>
+            tr.docChanged ? createKansoTicketDecorations(tr.doc) : oldSet,
+        },
+        props: {
+          decorations(state) {
+            return this.getState(state);
+          },
+        },
+      }),
+    ];
+  },
 });
 
 export interface RichDocumentEditorHandle {
@@ -178,6 +233,7 @@ export const RichDocumentEditor = forwardRef<
       TaskList,
       TaskItem.configure({ nested: true }),
       CustomCodeBlock,
+      KansoTicketHighlight,
     ],
     content: markdownToHtml(content),
     editorProps: {
