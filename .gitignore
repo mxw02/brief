@@ -44,3 +44,4 @@ Thumbs.db
 # Local Docker volumes / data
 data/
 uploads/
+.brief-data/

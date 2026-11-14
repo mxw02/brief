@@ -1,29 +1,42 @@
 services:
   brief:
     image: ghcr.io/mxw02/brief:${BRIEF_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: brief
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
-    env_file:
-      - .env
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-brief}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-brief}
+      BRIEF_DATA_DIR: /app/data
+      BRIEF_UPLOADS_DIR: /app/uploads
+      BRIEF_API_TOKEN: ${BRIEF_API_TOKEN:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-brief}:${POSTGRES_PASSWORD:-brief}@postgres:5432/${POSTGRES_DB:-brief}}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
+      - brief_data:/app/data
       - brief_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   postgres:
     image: postgres:16-alpine
     container_name: brief-postgres
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-brief}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brief}
       POSTGRES_DB: ${POSTGRES_DB:-brief}
     volumes:
       - brief_pgdata:/var/lib/postgresql/data
@@ -34,5 +47,6 @@ services:
       retries: 5
 
 volumes:
-  brief_pgdata:
+  brief_data:
   brief_uploads:
+  brief_pgdata:

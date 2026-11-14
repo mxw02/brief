@@ -1,0 +1,1187 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bot,
+  Check,
+  Command,
+  FilePlus2,
+  Lock,
+  LogOut,
+  MessageSquare,
+  Minimize2,
+  PanelLeft,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  User,
+  Users,
+} from "lucide-react";
+import {
+  buildAgentContextMarkdown,
+  buildSpaceContextMarkdown,
+} from "@/lib/agent-context";
+import { parseFrontmatter, serializeFrontmatter } from "@/lib/frontmatter";
+import { buildSearchIndex } from "@/lib/search-index";
+import { SLASH_COMMANDS } from "@/lib/slash-commands";
+import {
+  DEFAULT_DOCUMENTS,
+  DEFAULT_SPACES,
+  findBacklinks,
+  getDocumentAncestors,
+  normalizeDocumentStatus,
+  SPEC_STATUS_META,
+  SPEC_STATUSES,
+  type BriefDocument,
+  type DocumentStatus,
+  type InlineComment,
+  type PublicUser,
+  type Space,
+} from "@/lib/workspace";
+import { AgentMcpModal } from "./AgentMcpModal";
+import { AuthScreen } from "./AuthScreen";
+import { BacklinksPanel } from "./BacklinksPanel";
+import { CommandPalette, type PaletteAction } from "./CommandPalette";
+import { CommentsPanel } from "./CommentsPanel";
+import { FrontmatterBar } from "./FrontmatterBar";
+import { KansoEmbedsPanel } from "./KansoEmbedsPanel";
+import {
+  RichDocumentEditor,
+  type RichDocumentEditorHandle,
+} from "./RichDocumentEditor";
+import { SearchModal } from "./SearchModal";
+import { SpaceSidebar } from "./SpaceSidebar";
+import { TeamAccessModal } from "./TeamAccessModal";
+
+const STORAGE_WORKSPACE_KEY = "brief:workspace:v2";
+
+function makeId(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}`;
+}
+
+export function BriefEditor() {
+  const [spaces, setSpaces] = useState<Space[]>(DEFAULT_SPACES);
+  const [documents, setDocuments] =
+    useState<BriefDocument[]>(DEFAULT_DOCUMENTS);
+  const [activeDocId, setActiveDocId] = useState<string>(
+    DEFAULT_DOCUMENTS[0].id
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [focusMode, setFocusMode] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [copiedAgentContext, setCopiedAgentContext] = useState(false);
+
+  const [authLoading, setAuthLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [ssoInfo, setSsoInfo] = useState<{
+    enabled: boolean;
+    providerName: string;
+  }>({ enabled: false, providerName: "Keycloak" });
+  const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
+
+  const richEditorRef = useRef<RichDocumentEditorHandle>(null);
+  const hydratedRef = useRef(false);
+  const lastServerSyncRef = useRef<string>("");
+
+  const loadWorkspaceForUser = useCallback(async () => {
+    hydratedRef.current = false;
+    setWorkspaceLoading(true);
+    try {
+      const res = await fetch("/api/workspace");
+      if (!res.ok) return;
+      const serverData = (await res.json()) as {
+        spaces?: Space[];
+        documents?: BriefDocument[];
+      };
+      const nextSpaces = Array.isArray(serverData.spaces)
+        ? serverData.spaces
+        : [];
+      const nextDocs = Array.isArray(serverData.documents)
+        ? serverData.documents.map((d) => ({
+            ...d,
+            parentId: d.parentId ?? null,
+          }))
+        : [];
+      setSpaces(nextSpaces);
+      setDocuments(nextDocs);
+      lastServerSyncRef.current = JSON.stringify({
+        spaces: nextSpaces,
+        documents: nextDocs,
+      });
+      setActiveDocId((prev) =>
+        nextDocs.some((d) => d.id === prev) ? prev : (nextDocs[0]?.id ?? "")
+      );
+    } catch {
+      // Ignore network errors
+    } finally {
+      hydratedRef.current = true;
+      setWorkspaceLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const checkSession = async () => {
+      try {
+        const res = await fetch("/api/auth/session");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user?: PublicUser | null;
+          needsSetup?: boolean;
+          sso?: { enabled: boolean; providerName: string };
+        };
+        if (!active) return;
+        setNeedsSetup(Boolean(data.needsSetup));
+        if (data.sso) setSsoInfo(data.sso);
+        setCurrentUser(data.user ?? null);
+        if (data.user) {
+          await loadWorkspaceForUser();
+        }
+      } catch {
+        // Ignore
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    };
+    void checkSession();
+    return () => {
+      active = false;
+    };
+  }, [loadWorkspaceForUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const syncFromServer = async () => {
+      try {
+        const res = await fetch("/api/workspace");
+        if (!res.ok) return;
+        const serverData = (await res.json()) as {
+          spaces?: Space[];
+          documents?: BriefDocument[];
+        };
+        if (serverData.spaces) {
+          setSpaces(serverData.spaces);
+        }
+        if (serverData.documents) {
+          setDocuments((prev) => {
+            const localIds = new Set(prev.map((d) => d.id));
+            const newDrafts = serverData.documents!.filter(
+              (d) => d.status === "draft" && !localIds.has(d.id)
+            );
+            return newDrafts.length > 0 ? [...prev, ...newDrafts] : prev;
+          });
+        }
+      } catch {
+        // Ignore background sync errors
+      }
+    };
+
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void syncFromServer();
+      }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_WORKSPACE_KEY,
+        JSON.stringify({ spaces, documents, activeDocId })
+      );
+    } catch {
+      // Ignore storage errors
+    }
+
+    if (!hydratedRef.current || !currentUser || currentUser.role === "viewer") {
+      return;
+    }
+    const payload = JSON.stringify({ spaces, documents });
+    if (payload === lastServerSyncRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastServerSyncRef.current = payload;
+      fetch("/api/workspace", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [spaces, documents, activeDocId, currentUser]);
+
+  const activeDoc = useMemo(
+    () => documents.find((d) => d.id === activeDocId) ?? documents[0],
+    [documents, activeDocId]
+  );
+
+  const activeSpace = useMemo(
+    () => spaces.find((s) => s.id === activeDoc?.spaceId),
+    [spaces, activeDoc]
+  );
+
+  const ancestors = useMemo(
+    () => (activeDoc ? getDocumentAncestors(activeDoc.id, documents) : []),
+    [activeDoc, documents]
+  );
+
+  const title = activeDoc?.title ?? "";
+  const content = activeDoc?.content ?? "";
+  const parsedFrontmatter = useMemo(() => parseFrontmatter(content), [content]);
+
+  const updateActiveDoc = useCallback(
+    (patch: Partial<Pick<BriefDocument, "title" | "content" | "status">>) => {
+      if (currentUser?.role === "viewer") return;
+      const now = new Date().toISOString();
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === activeDoc?.id
+            ? {
+                ...doc,
+                ...patch,
+                updatedAt: now,
+                lastEditedBy: currentUser?.name ?? doc.lastEditedBy,
+                lastEditedByType: "human",
+              }
+            : doc
+        )
+      );
+    },
+    [activeDoc?.id, currentUser]
+  );
+
+  // Global keyboard shortcuts (Cmd/Ctrl+K, Cmd/Ctrl+P, Cmd/Ctrl+Shift+F, Cmd/Ctrl+\)
+  useEffect(() => {
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(false);
+        setPaletteOpen((prev) => !prev);
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key.toLowerCase() === "p" ||
+          (e.shiftKey && e.key.toLowerCase() === "f"))
+      ) {
+        e.preventDefault();
+        setPaletteOpen(false);
+        setSearchOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+        e.preventDefault();
+        setFocusMode((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown);
+  }, []);
+
+  const handleCreateDoc = useCallback(
+    (spaceId: string, parentId: string | null = null, customTitle?: string) => {
+      const docTitle = customTitle?.trim() || "Untitled Page";
+      const newDoc: BriefDocument = {
+        id: makeId("doc"),
+        spaceId,
+        parentId,
+        title: docTitle,
+        content: `## Overview\n\nStart writing **${docTitle}**...\n`,
+        updatedAt: new Date().toISOString(),
+        status: "draft",
+      };
+      setDocuments((prev) => [...prev, newDoc]);
+      setActiveDocId(newDoc.id);
+    },
+    []
+  );
+
+  const handleDeleteDoc = useCallback(
+    (docId: string) => {
+      setDocuments((prev) => {
+        if (prev.length <= 1) return prev;
+        const target = prev.find((d) => d.id === docId);
+        // Re-parent any child pages cleanly so no nested pages are orphaned
+        const next = prev
+          .filter((d) => d.id !== docId)
+          .map((d) =>
+            d.parentId === docId
+              ? { ...d, parentId: target?.parentId ?? null }
+              : d
+          );
+        if (docId === activeDocId && next[0]) {
+          setActiveDocId(next[0].id);
+        }
+        return next;
+      });
+    },
+    [activeDocId]
+  );
+
+  const handleCreateSpace = useCallback((name: string) => {
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const newSpace: Space = {
+      id: makeId("space"),
+      name,
+      slug: slug || "space",
+    };
+    setSpaces((prev) => [...prev, newSpace]);
+  }, []);
+
+  const handleOpenOrCreateWikiLink = useCallback(
+    (targetTitle: string) => {
+      const normalized = targetTitle.trim().toLowerCase();
+      const existing = documents.find(
+        (d) => d.title.trim().toLowerCase() === normalized
+      );
+      if (existing) {
+        setActiveDocId(existing.id);
+        return;
+      }
+      if (activeDoc) {
+        handleCreateDoc(activeDoc.spaceId, activeDoc.id, targetTitle.trim());
+      }
+    },
+    [activeDoc, documents, handleCreateDoc]
+  );
+
+  const handleCreateAndLinkDoc = useCallback(
+    (docTitle: string) => {
+      if (!activeDoc) return;
+      const newDoc: BriefDocument = {
+        id: makeId("doc"),
+        spaceId: activeDoc.spaceId,
+        parentId: activeDoc.id,
+        title: docTitle,
+        content: `## Overview\n\n`,
+        updatedAt: new Date().toISOString(),
+        status: "draft",
+      };
+      setDocuments((prev) => [...prev, newDoc]);
+    },
+    [activeDoc]
+  );
+
+  const handleCopyDocument = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(`# ${title}\n\n${content}`);
+    } catch {
+      // Clipboard may be unavailable
+    }
+  }, [content, title]);
+
+  const handleCopyAgentContext = useCallback(async () => {
+    if (!activeDoc) return;
+    try {
+      const payload = buildAgentContextMarkdown(activeDoc, documents, spaces, {
+        sameSpaceOnly: true,
+      });
+      await navigator.clipboard.writeText(payload);
+      setCopiedAgentContext(true);
+      setTimeout(() => setCopiedAgentContext(false), 2000);
+    } catch {
+      // Clipboard may be unavailable
+    }
+  }, [activeDoc, documents, spaces]);
+
+  const handleCopySpaceContext = useCallback(
+    async (spaceId: string) => {
+      const space = spaces.find((s) => s.id === spaceId);
+      if (!space) return;
+      try {
+        const payload = buildSpaceContextMarkdown(space, documents);
+        await navigator.clipboard.writeText(payload);
+      } catch {
+        // Clipboard may be unavailable
+      }
+    },
+    [documents, spaces]
+  );
+
+  const searchIndex = useMemo(
+    () => buildSearchIndex(documents, spaces),
+    [documents, spaces]
+  );
+
+  const backlinks = useMemo(
+    () => (activeDoc ? findBacklinks(activeDoc, documents, spaces) : []),
+    [activeDoc, documents, spaces]
+  );
+
+  const paletteActions: PaletteAction[] = useMemo(() => {
+    const spaceMap = new Map(spaces.map((s) => [s.id, s.name]));
+    return [
+      {
+        id: "open-search",
+        group: "Navigate" as const,
+        label: "Instant Full-Text Search",
+        description: "Search across all spaces and document contents (<50ms)",
+        shortcut: "⌘P",
+        onRun: () => setSearchOpen(true),
+      },
+      ...documents.map((doc) => ({
+        id: `nav-${doc.id}`,
+        group: "Navigate" as const,
+        label: doc.title || "Untitled",
+        description: `Open in ${spaceMap.get(doc.spaceId) ?? "Space"}`,
+        onRun: () => setActiveDocId(doc.id),
+      })),
+      {
+        id: "toggle-sidebar",
+        group: "View",
+        label: sidebarOpen ? "Hide Spaces Sidebar" : "Show Spaces Sidebar",
+        description: "Toggle nested page tree",
+        onRun: () => setSidebarOpen((prev) => !prev),
+      },
+      {
+        id: "toggle-focus",
+        group: "View",
+        label: focusMode ? "Exit Focus Mode" : "Enter Focus Mode",
+        description: "Hide chrome for distraction-free writing",
+        shortcut: "⌘\\",
+        onRun: () => setFocusMode((prev) => !prev),
+      },
+      ...SLASH_COMMANDS.map((cmd) => ({
+        id: `insert-${cmd.id}`,
+        group: (cmd.category === "template" ? "Template" : "Insert") as
+          | "Template"
+          | "Insert",
+        label:
+          cmd.category === "template"
+            ? `Template: ${cmd.label}`
+            : `Insert ${cmd.label}`,
+        description: cmd.description,
+        shortcut: cmd.shortcut,
+        onRun: () => {
+          richEditorRef.current?.insertMarkdownSnippet(cmd.snippet);
+        },
+      })),
+      {
+        id: "doc-new-child",
+        group: "Document",
+        label: "New Nested Child Page",
+        description: `Create a sub-page under "${title || "Untitled"}"`,
+        onRun: () => {
+          if (activeDoc) handleCreateDoc(activeDoc.spaceId, activeDoc.id);
+        },
+      },
+      {
+        id: "doc-new-root",
+        group: "Document",
+        label: "New Top-Level Page",
+        description: `Create a page in ${activeSpace?.name ?? "Space"}`,
+        onRun: () => {
+          if (activeDoc) handleCreateDoc(activeDoc.spaceId, null);
+        },
+      },
+      {
+        id: "doc-copy-agent-context",
+        group: "Document",
+        label: "Copy Page as Agent Context",
+        description: `Export page + same-space linked docs (${activeSpace?.name ?? "Space"})`,
+        onRun: handleCopyAgentContext,
+      },
+      ...(activeSpace
+        ? [
+            {
+              id: "space-copy-agent-context",
+              group: "Document" as const,
+              label: `Copy Space as Agent Context (${activeSpace.name})`,
+              description: `Export all documents in ${activeSpace.name} as Markdown`,
+              onRun: () => handleCopySpaceContext(activeSpace.id),
+            },
+          ]
+        : []),
+      {
+        id: "doc-copy",
+        group: "Document",
+        label: "Copy Markdown",
+        description: "Copy document as Markdown to clipboard",
+        onRun: handleCopyDocument,
+      },
+      {
+        id: "agent-mcp-settings",
+        group: "Document",
+        label: "Agent API & MCP Settings",
+        description: "Manage API tokens and MCP configuration for AI agents",
+        onRun: () => setMcpModalOpen(true),
+      },
+      {
+        id: "doc-reset",
+        group: "Document",
+        label: "Reset Demo Workspace",
+        description: "Restore default Spaces and nested docs",
+        onRun: () => {
+          setSpaces(DEFAULT_SPACES);
+          setDocuments(DEFAULT_DOCUMENTS);
+          setActiveDocId(DEFAULT_DOCUMENTS[0].id);
+        },
+      },
+    ];
+  }, [
+    activeDoc,
+    activeSpace,
+    documents,
+    focusMode,
+    handleCopyAgentContext,
+    handleCopyDocument,
+    handleCopySpaceContext,
+    handleCreateDoc,
+    sidebarOpen,
+    spaces,
+    title,
+  ]);
+
+  const handleApproveDraft = useCallback(
+    (draft: BriefDocument) => {
+      const now = new Date().toISOString();
+      if (
+        draft.proposalTargetId &&
+        documents.some((d) => d.id === draft.proposalTargetId)
+      ) {
+        const targetId = draft.proposalTargetId;
+        setDocuments((prev) =>
+          prev
+            .filter((d) => d.id !== draft.id)
+            .map((d) =>
+              d.id === targetId
+                ? { ...d, content: draft.content, updatedAt: now }
+                : d
+            )
+        );
+        setActiveDocId(targetId);
+        return;
+      }
+
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === draft.id
+            ? {
+                ...d,
+                status: "approved",
+                proposedBy: undefined,
+                proposalTargetId: undefined,
+                proposalSummary: undefined,
+                updatedAt: now,
+              }
+            : d
+        )
+      );
+    },
+    [documents]
+  );
+
+  const handleAddInlineComment = useCallback(
+    (quote: string, body: string, from?: number, to?: number) => {
+      if (!activeDoc) return;
+      const comment: InlineComment = {
+        id: makeId("cmt"),
+        quote,
+        ...(typeof from === "number" ? { from } : {}),
+        ...(typeof to === "number" ? { to } : {}),
+        body,
+        author: "Author",
+        resolved: false,
+        createdAt: new Date().toISOString(),
+      };
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: [comment, ...(d.comments ?? [])],
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
+  const handleToggleResolveComment = useCallback(
+    (commentId: string) => {
+      if (!activeDoc) return;
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: (d.comments ?? []).map((c) =>
+                  c.id === commentId ? { ...c, resolved: !c.resolved } : c
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
+  const handleDeleteComment = useCallback(
+    (commentId: string) => {
+      if (!activeDoc) return;
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === activeDoc.id
+            ? {
+                ...d,
+                comments: (d.comments ?? []).filter((c) => c.id !== commentId),
+                updatedAt: new Date().toISOString(),
+              }
+            : d
+        )
+      );
+    },
+    [activeDoc]
+  );
+
+  const stats = useMemo(() => {
+    const trimmed = content.trim();
+    const words = trimmed ? trimmed.split(/\s+/).length : 0;
+    const chars = content.length;
+    const readingMinutes = Math.max(1, Math.ceil(words / 200));
+    return { words, chars, readingMinutes };
+  }, [content]);
+
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9F9F8] text-sm text-zinc-500">
+        Lade Brief Workspace...
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthScreen
+        needsSetup={needsSetup}
+        sso={ssoInfo}
+        onAuthenticated={(user) => {
+          setNeedsSetup(false);
+          setCurrentUser(user);
+          void loadWorkspaceForUser();
+        }}
+      />
+    );
+  }
+
+  if (workspaceLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9F9F8] text-sm text-zinc-500">
+        Lade freigegebene Spaces...
+      </div>
+    );
+  }
+
+  if (spaces.length === 0 && currentUser.role !== "admin") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F9F9F8] px-4 py-12">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-7 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h1 className="text-lg font-semibold text-zinc-900">
+            Noch kein Zugriff auf einen Space
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+            Du bist als{" "}
+            <span className="font-medium text-zinc-900">
+              {currentUser.name}
+            </span>{" "}
+            ({currentUser.email}) angemeldet, aber dir wurde noch kein Space
+            freigegeben. Bitte wende dich an deinen Administrator, damit er dir
+            Zugriff auf die benötigten Spaces erteilt.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch("/api/auth/session");
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    user?: PublicUser | null;
+                  };
+                  if (data.user) setCurrentUser(data.user);
+                }
+                await loadWorkspaceForUser();
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-teal-700 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-teal-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Zugriff erneut prüfen
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                setCurrentUser(null);
+                hydratedRef.current = false;
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Abmelden
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isViewer = currentUser.role === "viewer";
+
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-50 text-zinc-900">
+      {!focusMode && (
+        <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white px-4 py-2.5 sm:px-6">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen((prev) => !prev)}
+                className={`rounded-lg border p-1.5 transition-colors ${
+                  sidebarOpen
+                    ? "border-teal-200 bg-teal-50 text-teal-700"
+                    : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900"
+                }`}
+                title="Toggle Spaces & Page Tree"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0f766e] text-sm font-bold text-white shadow-xs">
+                B
+              </span>
+
+              <nav
+                aria-label="Breadcrumb"
+                className="flex min-w-0 items-center gap-1.5 text-xs"
+              >
+                {activeSpace && (
+                  <span className="hidden rounded-md border border-zinc-200 bg-zinc-100/70 px-1.5 py-0.5 font-medium text-zinc-600 sm:inline">
+                    {activeSpace.name}
+                  </span>
+                )}
+                {ancestors.map((ancestor) => (
+                  <span
+                    key={ancestor.id}
+                    className="hidden items-center gap-1.5 md:inline-flex"
+                  >
+                    <span className="text-zinc-300">/</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveDocId(ancestor.id)}
+                      className="max-w-[140px] truncate text-zinc-500 hover:text-teal-700"
+                    >
+                      {ancestor.title}
+                    </button>
+                  </span>
+                ))}
+                <span className="text-zinc-300">/</span>
+                <span className="truncate font-semibold text-zinc-800">
+                  {title || "Untitled"}
+                </span>
+              </nav>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSearchOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                title="Instant Search (Cmd+P)"
+              >
+                <Search className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Search...</span>
+                <kbd className="rounded bg-white px-1 py-0.5 font-mono text-[10px] text-zinc-500 shadow-2xs">
+                  ⌘P
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeDoc) handleCreateDoc(activeDoc.spaceId, activeDoc.id);
+                }}
+                className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 sm:inline-flex"
+                title="Create nested child page"
+              >
+                <FilePlus2 className="h-3.5 w-3.5" />
+                <span className="hidden lg:inline">Child Page</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaletteOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                title="Command Palette (Cmd+K)"
+              >
+                <Command className="h-3.5 w-3.5" />
+                <span className="hidden md:inline">Commands</span>
+                <kbd className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] text-zinc-500">
+                  ⌘K
+                </kbd>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyAgentContext}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                title="Copy page + nested & [[linked]] docs as Agent Context"
+              >
+                {copiedAgentContext ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-700" />
+                    <span className="hidden lg:inline">Copied Context</span>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="h-3.5 w-3.5" />
+                    <span className="hidden lg:inline">Copy Context</span>
+                  </>
+                )}
+              </button>
+
+              {currentUser?.role === "admin" && (
+                <button
+                  type="button"
+                  onClick={() => setTeamModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                  title="Team, Rollen & Space-Zugriff"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span className="hidden xl:inline">Team &amp; Rechte</span>
+                </button>
+              )}
+
+              {currentUser && (
+                <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700">
+                  <User className="h-3.5 w-3.5 text-zinc-500" />
+                  <span className="hidden sm:inline font-medium">
+                    {currentUser.name}
+                  </span>
+                  <span className="rounded bg-zinc-200/70 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-zinc-700">
+                    {currentUser.role}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch("/api/auth/logout", { method: "POST" });
+                      setCurrentUser(null);
+                      hydratedRef.current = false;
+                    }}
+                    className="ml-0.5 rounded p-0.5 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-800"
+                    title="Abmelden"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+      )}
+
+      {focusMode && (
+        <button
+          type="button"
+          onClick={() => setFocusMode(false)}
+          className="fixed right-5 top-4 z-40 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white/95 px-2.5 py-1.5 text-xs font-medium text-zinc-600 shadow-sm backdrop-blur transition-colors hover:text-zinc-900"
+        >
+          <Minimize2 className="h-3.5 w-3.5 text-teal-700" />
+          Exit Focus (⌘\)
+        </button>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
+        {!focusMode && sidebarOpen && (
+          <SpaceSidebar
+            spaces={spaces}
+            documents={documents}
+            activeDocId={activeDoc?.id ?? ""}
+            onSelectDoc={setActiveDocId}
+            onCreateDoc={(spaceId, parentId) =>
+              handleCreateDoc(spaceId, parentId ?? null)
+            }
+            onDeleteDoc={handleDeleteDoc}
+            onCreateSpace={handleCreateSpace}
+            onCopySpaceContext={handleCopySpaceContext}
+            onOpenAgentMcp={() => setMcpModalOpen(true)}
+          />
+        )}
+
+        <main className="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+          <article className="flex w-full flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
+            {activeDoc?.status === "draft" &&
+              Boolean(
+                activeDoc.proposedBy ||
+                  activeDoc.proposalTargetId ||
+                  activeDoc.proposalSummary
+              ) && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">
+                    Agent Draft Proposal
+                    {activeDoc.proposedBy ? ` · by ${activeDoc.proposedBy}` : ""}
+                  </div>
+                  {activeDoc.proposalSummary && (
+                    <p className="mt-0.5 text-amber-800/90">
+                      {activeDoc.proposalSummary}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApproveDraft(activeDoc)}
+                    className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-800"
+                  >
+                    Approve &amp; Publish
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDoc(activeDoc.id)}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100/60"
+                  >
+                    Discard Draft
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-zinc-100 pb-4">
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => updateActiveDoc({ title: e.target.value })}
+                placeholder="Page Title"
+                aria-label="Page title"
+                className="w-full bg-transparent text-3xl font-bold tracking-tight text-zinc-900 placeholder:text-zinc-300 focus:outline-none sm:text-4xl"
+              />
+              <div className="mt-1 flex shrink-0 items-center gap-2">
+                {(() => {
+                  const openComments = (activeDoc?.comments ?? []).filter(
+                    (c) => !c.resolved
+                  ).length;
+                  if (openComments === 0) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        document
+                          .getElementById("brief-comments-panel")
+                          ?.scrollIntoView({ behavior: "smooth" })
+                      }
+                      className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800"
+                      title="Jump to open inline comments"
+                    >
+                      <MessageSquare className="h-3 w-3 text-teal-700" />
+                      {openComments}
+                    </button>
+                  );
+                })()}
+                {(() => {
+                  const currentStatus = normalizeDocumentStatus(
+                    activeDoc?.status
+                  );
+                  const meta = SPEC_STATUS_META[currentStatus];
+                  return (
+                    <div
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${meta.badgeClass}`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`}
+                      />
+                      <select
+                        aria-label="Document status"
+                        value={currentStatus}
+                        onChange={(e) =>
+                          updateActiveDoc({
+                            status: e.target.value as DocumentStatus,
+                          })
+                        }
+                        className="cursor-pointer bg-transparent pr-1 font-medium focus:outline-none"
+                      >
+                        {SPEC_STATUSES.map((st) => (
+                          <option key={st} value={st} className="text-zinc-900">
+                            {SPEC_STATUS_META[st].label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+                {(activeDoc?.lastEditedBy || activeDoc?.proposedBy) && (
+                  <span
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
+                      activeDoc?.lastEditedByType === "agent" ||
+                      Boolean(activeDoc?.proposedBy)
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-zinc-200 bg-zinc-100 text-zinc-700"
+                    }`}
+                    title={
+                      activeDoc?.lastEditedByType === "agent" ||
+                      Boolean(activeDoc?.proposedBy)
+                        ? "Bearbeitet durch Agent-Bot"
+                        : "Bearbeitet durch Mensch"
+                    }
+                  >
+                    {activeDoc?.lastEditedByType === "agent" ||
+                    Boolean(activeDoc?.proposedBy) ? (
+                      <Bot className="h-3 w-3 text-emerald-700" />
+                    ) : (
+                      <User className="h-3 w-3 text-zinc-700" />
+                    )}
+                    {activeDoc?.lastEditedBy || activeDoc?.proposedBy}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpaces(DEFAULT_SPACES);
+                    setDocuments(DEFAULT_DOCUMENTS);
+                    setActiveDocId(DEFAULT_DOCUMENTS[0].id);
+                  }}
+                  className="shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                  title="Reset demo workspace"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <FrontmatterBar
+              metadata={parsedFrontmatter.metadata}
+              onChange={(nextMeta) =>
+                updateActiveDoc({
+                  content: serializeFrontmatter(
+                    nextMeta,
+                    parsedFrontmatter.body
+                  ),
+                })
+              }
+            />
+
+            <RichDocumentEditor
+              ref={richEditorRef}
+              docId={activeDoc?.id ?? "default"}
+              docTitle={activeDoc?.title ?? "Untitled Page"}
+              content={parsedFrontmatter.body}
+              documents={documents}
+              spaces={spaces}
+              readOnly={isViewer}
+              onChangeMarkdown={(md) =>
+                updateActiveDoc({
+                  content: serializeFrontmatter(parsedFrontmatter.metadata, md),
+                })
+              }
+              onOpenOrCreateWikiLink={handleOpenOrCreateWikiLink}
+              onCreateAndLinkDoc={handleCreateAndLinkDoc}
+              onAddInlineComment={handleAddInlineComment}
+            />
+
+            <KansoEmbedsPanel content={content} />
+
+            <CommentsPanel
+              comments={activeDoc?.comments ?? []}
+              onToggleResolve={handleToggleResolveComment}
+              onDeleteComment={handleDeleteComment}
+              onJumpToQuote={(comment) => {
+                richEditorRef.current?.focusQuote(
+                  comment.quote,
+                  comment.from,
+                  comment.to
+                );
+              }}
+            />
+
+            <BacklinksPanel
+              backlinks={backlinks}
+              onNavigate={setActiveDocId}
+            />
+          </article>
+        </main>
+      </div>
+
+      {!focusMode && (
+        <footer className="border-t border-zinc-200/80 bg-white px-4 py-2 text-xs text-zinc-500 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-4">
+              <span>{stats.words} words</span>
+              <span>{stats.chars} chars</span>
+              <span>~{stats.readingMinutes} min read</span>
+            </div>
+            <div className="flex items-center gap-3 text-zinc-400">
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  /
+                </kbd>{" "}
+                blocks &amp; templates
+              </span>
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  [[
+                </kbd>{" "}
+                link doc
+              </span>
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  ⌘P
+                </kbd>{" "}
+                search
+              </span>
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  ⌘K
+                </kbd>{" "}
+                palette
+              </span>
+              <span>
+                <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 font-mono text-[10px] text-zinc-600">
+                  ⌘\
+                </kbd>{" "}
+                focus
+              </span>
+            </div>
+          </div>
+        </footer>
+      )}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        actions={paletteActions}
+      />
+
+      <SearchModal
+        open={searchOpen}
+        index={searchIndex}
+        spaces={spaces}
+        onClose={() => setSearchOpen(false)}
+        onSelectDoc={setActiveDocId}
+      />
+
+      <AgentMcpModal
+        open={mcpModalOpen}
+        onClose={() => setMcpModalOpen(false)}
+      />
+
+      {currentUser && (
+        <TeamAccessModal
+          open={teamModalOpen}
+          currentUser={currentUser}
+          spaces={spaces}
+          onClose={() => setTeamModalOpen(false)}
+          onUserUpdated={(updated) => setCurrentUser(updated)}
+        />
+      )}
+    </div>
+  );
+}

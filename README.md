@@ -89,6 +89,8 @@ git checkout develop
 cp .env.example .env
 ```
 
+See the [Development Guide](DEVELOPMENT.md) for the full local setup, architecture, design tokens, and roadmap.
+
 ---
 
 ## Branching & Release Workflow
