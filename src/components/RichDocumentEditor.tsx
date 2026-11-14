@@ -20,6 +20,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
+import { MessageSquarePlus, X } from "lucide-react";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown-bridge";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import { BRIEF_DOC_HREF_PREFIX, type BriefDocument, type Space } from "@/lib/workspace";
@@ -41,6 +42,7 @@ const CustomCodeBlock = CodeBlockLowlight.extend({
 export interface RichDocumentEditorHandle {
   insertMarkdownSnippet: (snippet: string) => void;
   focus: () => void;
+  focusQuote: (quote: string, from?: number, to?: number) => boolean;
 }
 
 interface RichDocumentEditorProps {
@@ -51,6 +53,12 @@ interface RichDocumentEditorProps {
   onChangeMarkdown: (markdown: string) => void;
   onOpenOrCreateWikiLink: (targetTitle: string) => void;
   onCreateAndLinkDoc: (title: string) => void;
+  onAddInlineComment?: (
+    quote: string,
+    body: string,
+    from?: number,
+    to?: number
+  ) => void;
 }
 
 interface TriggerState {
@@ -81,6 +89,7 @@ export const RichDocumentEditor = forwardRef<
     onChangeMarkdown,
     onOpenOrCreateWikiLink,
     onCreateAndLinkDoc,
+    onAddInlineComment,
   },
   ref
 ) {
@@ -93,6 +102,16 @@ export const RichDocumentEditor = forwardRef<
 
   const [wikiIndex, setWikiIndex] = useState(0);
   const [wikiState, setWikiState] = useState<TriggerState>(CLOSED_TRIGGER);
+
+  const [selectionComment, setSelectionComment] = useState<{
+    quote: string;
+    from: number;
+    to: number;
+    top: number;
+    left: number;
+    composing: boolean;
+    draft: string;
+  } | null>(null);
 
   const filteredSlashCommands = useMemo(() => {
     const q = slashState.query.trim().toLowerCase();
@@ -287,12 +306,31 @@ export const RichDocumentEditor = forwardRef<
   const detectTriggers = useCallback(
     (ed: NonNullable<typeof editor>) => {
       const { state } = ed;
-      const { from, empty } = state.selection;
+      const { from, to, empty } = state.selection;
       if (!empty) {
         setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
         setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+        const selectedText = state.doc.textBetween(from, to, " ").trim();
+        if (selectedText && onAddInlineComment) {
+          const coords = getCursorCoords(from);
+          setSelectionComment((prev) =>
+            prev?.composing
+              ? prev
+              : {
+                  quote: selectedText.slice(0, 140),
+                  from,
+                  to,
+                  top: Math.max(8, coords.top - 64),
+                  left: Math.min(coords.left, 420),
+                  composing: false,
+                  draft: "",
+                }
+          );
+        }
         return;
       }
+
+      setSelectionComment((prev) => (prev?.composing ? prev : null));
 
       const $from = state.selection.$from;
       // Don't trigger inside code blocks
@@ -337,7 +375,7 @@ export const RichDocumentEditor = forwardRef<
       }
       setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
     },
-    [getCursorCoords]
+    [getCursorCoords, onAddInlineComment]
   );
 
   const applySlashCommand = useCallback(
@@ -409,6 +447,47 @@ export const RichDocumentEditor = forwardRef<
       focus: () => {
         editor?.commands.focus();
       },
+      focusQuote: (quote: string, from?: number, to?: number) => {
+        if (!editor) return false;
+        const doc = editor.state.doc;
+        let matchFrom = -1;
+        let matchTo = -1;
+
+        if (
+          typeof from === "number" &&
+          typeof to === "number" &&
+          from >= 0 &&
+          to <= doc.content.size &&
+          doc.textBetween(from, to, " ").trim() === quote.trim()
+        ) {
+          matchFrom = from;
+          matchTo = to;
+        } else if (quote.trim()) {
+          const needle = quote.trim().toLowerCase();
+          doc.descendants((node, pos) => {
+            if (matchFrom !== -1) return false;
+            if (!node.isText || !node.text) return true;
+            const idx = node.text.toLowerCase().indexOf(needle);
+            if (idx !== -1) {
+              matchFrom = pos + idx;
+              matchTo = matchFrom + needle.length;
+              return false;
+            }
+            return true;
+          });
+        }
+
+        if (matchFrom === -1 || matchTo === -1) return false;
+
+        editor.chain().focus().setTextSelection({ from: matchFrom, to: matchTo }).run();
+        const domAt = editor.view.domAtPos(matchFrom);
+        const el =
+          domAt.node instanceof HTMLElement
+            ? domAt.node
+            : domAt.node.parentElement;
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return true;
+      },
     }),
     [editor]
   );
@@ -416,6 +495,85 @@ export const RichDocumentEditor = forwardRef<
   return (
     <div ref={containerRef} className="relative flex-1">
       <EditorContent editor={editor} />
+
+      {selectionComment && onAddInlineComment && (
+        <div
+          style={{ top: selectionComment.top, left: selectionComment.left }}
+          className="absolute z-30 rounded-xl border border-zinc-200 bg-white shadow-lg"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {!selectionComment.composing ? (
+            <button
+              type="button"
+              onClick={() =>
+                setSelectionComment((prev) =>
+                  prev ? { ...prev, composing: true } : null
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:text-teal-700"
+            >
+              <MessageSquarePlus className="h-3.5 w-3.5 text-teal-700" />
+              Comment
+            </button>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const text = selectionComment.draft.trim();
+                if (!text) return;
+                onAddInlineComment(
+                  selectionComment.quote,
+                  text,
+                  selectionComment.from,
+                  selectionComment.to
+                );
+                setSelectionComment(null);
+              }}
+              className="w-72 p-2.5"
+            >
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="truncate text-[11px] italic text-zinc-400">
+                  &ldquo;{selectionComment.quote}&rdquo;
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectionComment(null)}
+                  className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <input
+                type="text"
+                autoFocus
+                value={selectionComment.draft}
+                onChange={(e) =>
+                  setSelectionComment((prev) =>
+                    prev ? { ...prev, draft: e.target.value } : null
+                  )
+                }
+                placeholder="Write a concise comment..."
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus:border-teal-700 focus:bg-white focus:outline-none"
+              />
+              <div className="mt-2 flex justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectionComment(null)}
+                  className="rounded-md px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-teal-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-teal-800"
+                >
+                  Comment
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
 
       {slashState.open && (
         <SlashCommandMenu

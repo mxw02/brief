@@ -65,6 +65,17 @@ export function normalizeDocumentStatus(
   return "approved";
 }
 
+export interface InlineComment {
+  id: string;
+  quote: string;
+  from?: number;
+  to?: number;
+  body: string;
+  author: string;
+  resolved: boolean;
+  createdAt: string;
+}
+
 export interface BriefDocument {
   id: string;
   spaceId: string;
@@ -76,6 +87,7 @@ export interface BriefDocument {
   proposedBy?: string;
   proposalTargetId?: string;
   proposalSummary?: string;
+  comments?: InlineComment[];
 }
 
 export interface Backlink {
