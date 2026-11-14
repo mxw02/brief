@@ -1,3 +1,7 @@
+import {
+  formatFrontmatterSearchText,
+  parseFrontmatter,
+} from "./frontmatter";
 import type { BriefDocument, Space } from "./workspace";
 
 export interface SearchIndexedDoc {
@@ -40,7 +44,9 @@ export function buildSearchIndex(
 
   return documents.map((doc) => {
     const spaceName = spaceMap.get(doc.spaceId) ?? "Space";
-    const plainText = toPlainText(doc.content);
+    const { metadata, body } = parseFrontmatter(doc.content);
+    const metaText = formatFrontmatterSearchText(metadata);
+    const plainText = [toPlainText(body), metaText].filter(Boolean).join(" ");
     return {
       doc,
       spaceName,

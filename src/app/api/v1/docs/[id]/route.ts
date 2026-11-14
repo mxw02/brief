@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAgentAuth } from "@/lib/agent-auth";
 import { buildAgentContextMarkdown } from "@/lib/agent-context";
+import { parseFrontmatter } from "@/lib/frontmatter";
 import { readWorkspaceStore } from "@/lib/server-store";
 
 export async function GET(
@@ -25,12 +26,14 @@ export async function GET(
   }
 
   const space = spaces.find((s) => s.id === doc.spaceId);
+  const { metadata } = parseFrontmatter(doc.content);
 
   return NextResponse.json({
     document: {
       ...doc,
-      status: doc.status ?? "published",
+      status: doc.status ?? "approved",
       spaceName: space?.name ?? "Space",
+      metadata,
     },
     ...(includeContext
       ? {

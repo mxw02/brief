@@ -15,6 +15,7 @@ import {
   buildAgentContextMarkdown,
   buildSpaceContextMarkdown,
 } from "@/lib/agent-context";
+import { parseFrontmatter, serializeFrontmatter } from "@/lib/frontmatter";
 import { buildSearchIndex } from "@/lib/search-index";
 import { SLASH_COMMANDS } from "@/lib/slash-commands";
 import {
@@ -32,6 +33,7 @@ import {
 import { AgentMcpModal } from "./AgentMcpModal";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
+import { FrontmatterBar } from "./FrontmatterBar";
 import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
@@ -183,6 +185,7 @@ export function BriefEditor() {
 
   const title = activeDoc?.title ?? "";
   const content = activeDoc?.content ?? "";
+  const parsedFrontmatter = useMemo(() => parseFrontmatter(content), [content]);
 
   const updateActiveDoc = useCallback(
     (patch: Partial<Pick<BriefDocument, "title" | "content" | "status">>) => {
@@ -761,13 +764,29 @@ export function BriefEditor() {
               </div>
             </div>
 
+            <FrontmatterBar
+              metadata={parsedFrontmatter.metadata}
+              onChange={(nextMeta) =>
+                updateActiveDoc({
+                  content: serializeFrontmatter(
+                    nextMeta,
+                    parsedFrontmatter.body
+                  ),
+                })
+              }
+            />
+
             <RichDocumentEditor
               ref={richEditorRef}
               docId={activeDoc?.id ?? "default"}
-              content={content}
+              content={parsedFrontmatter.body}
               documents={documents}
               spaces={spaces}
-              onChangeMarkdown={(md) => updateActiveDoc({ content: md })}
+              onChangeMarkdown={(md) =>
+                updateActiveDoc({
+                  content: serializeFrontmatter(parsedFrontmatter.metadata, md),
+                })
+              }
               onOpenOrCreateWikiLink={handleOpenOrCreateWikiLink}
               onCreateAndLinkDoc={handleCreateAndLinkDoc}
             />
