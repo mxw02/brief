@@ -28,9 +28,11 @@ import { MessageSquarePlus, X } from "lucide-react";
 import { htmlToMarkdown, markdownToHtml } from "@/lib/markdown-bridge";
 import { SLASH_COMMANDS, type SlashCommand } from "@/lib/slash-commands";
 import { BRIEF_DOC_HREF_PREFIX, type BriefDocument, type Space } from "@/lib/workspace";
+import type { KansoIssueSummary } from "@/lib/kanso";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { WikiLinkMenu } from "./WikiLinkMenu";
+import { KansoTicketMenu } from "./KansoTicketMenu";
 
 const lowlight = createLowlight(common);
 
@@ -158,6 +160,18 @@ export const RichDocumentEditor = forwardRef<
   const [wikiIndex, setWikiIndex] = useState(0);
   const [wikiState, setWikiState] = useState<TriggerState>(CLOSED_TRIGGER);
 
+  const [kansoIndex, setKansoIndex] = useState(0);
+  const [kansoState, setKansoState] = useState<TriggerState>(CLOSED_TRIGGER);
+  const [kansoIssues, setKansoIssues] = useState<KansoIssueSummary[]>([]);
+  const [kansoLoading, setKansoLoading] = useState(false);
+  const [kansoUnreachable, setKansoUnreachable] = useState(false);
+  const kansoStateRef = useRef(kansoState);
+  kansoStateRef.current = kansoState;
+  const kansoIndexRef = useRef(kansoIndex);
+  kansoIndexRef.current = kansoIndex;
+  const kansoIssuesRef = useRef(kansoIssues);
+  kansoIssuesRef.current = kansoIssues;
+
   const [selectionComment, setSelectionComment] = useState<{
     quote: string;
     from: number;
@@ -218,6 +232,50 @@ export const RichDocumentEditor = forwardRef<
   useEffect(() => {
     if (wikiIndex >= wikiTotalOptions) setWikiIndex(0);
   }, [wikiIndex, wikiTotalOptions]);
+
+  useEffect(() => {
+    if (kansoIndex >= kansoIssues.length) setKansoIndex(0);
+  }, [kansoIndex, kansoIssues.length]);
+
+  useEffect(() => {
+    if (!kansoState.open) {
+      setKansoLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const delay = kansoState.query ? 120 : 0;
+    const timer = window.setTimeout(async () => {
+      setKansoLoading(true);
+      try {
+        const res = await fetch(
+          `/api/kanso/issues?q=${encodeURIComponent(kansoState.query)}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          issues?: KansoIssueSummary[];
+          unreachable?: boolean;
+        };
+        if (!controller.signal.aborted) {
+          setKansoIssues(Array.isArray(data.issues) ? data.issues : []);
+          setKansoUnreachable(Boolean(data.unreachable));
+          setKansoIndex(0);
+        }
+      } catch {
+        // Ignore aborts
+      } finally {
+        if (!controller.signal.aborted) {
+          setKansoLoading(false);
+        }
+      }
+    }, delay);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [kansoState.open, kansoState.query]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -325,6 +383,39 @@ export const RichDocumentEditor = forwardRef<
           }
         }
 
+        if (kansoStateRef.current.open) {
+          const issues = kansoIssuesRef.current;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setKansoIndex((prev) =>
+              issues.length === 0 ? 0 : (prev + 1) % issues.length
+            );
+            return true;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setKansoIndex((prev) =>
+              issues.length === 0
+                ? 0
+                : (prev - 1 + issues.length) % issues.length
+            );
+            return true;
+          }
+          if (event.key === "Enter" || event.key === "Tab") {
+            const issue = issues[kansoIndexRef.current];
+            if (issue) {
+              event.preventDefault();
+              applyKansoSelectionRef.current(issue);
+              return true;
+            }
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setKansoState(CLOSED_TRIGGER);
+            return true;
+          }
+        }
+
         return false;
       },
     },
@@ -366,6 +457,7 @@ export const RichDocumentEditor = forwardRef<
       if (!empty) {
         setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
         setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+        setKansoState((p) => (p.open ? CLOSED_TRIGGER : p));
         const selectedText = state.doc.textBetween(from, to, " ").trim();
         if (selectedText && onAddInlineComment) {
           const coords = getCursorCoords(from);
@@ -393,6 +485,7 @@ export const RichDocumentEditor = forwardRef<
       if ($from.parent.type.name === "codeBlock") {
         setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
         setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
+        setKansoState((p) => (p.open ? CLOSED_TRIGGER : p));
         return;
       }
 
@@ -411,6 +504,7 @@ export const RichDocumentEditor = forwardRef<
           position: getCursorCoords(from),
         });
         setSlashState(CLOSED_TRIGGER);
+        setKansoState(CLOSED_TRIGGER);
         return;
       }
       setWikiState((p) => (p.open ? CLOSED_TRIGGER : p));
@@ -427,9 +521,26 @@ export const RichDocumentEditor = forwardRef<
           to: from,
           position: getCursorCoords(from),
         });
+        setKansoState(CLOSED_TRIGGER);
         return;
       }
       setSlashState((p) => (p.open ? CLOSED_TRIGGER : p));
+
+      const kansoMatch = /(?:^|[\s(])#([A-Za-z0-9-]*)$/.exec(textBefore);
+      if (kansoMatch) {
+        const offset = kansoMatch[0].startsWith("#") ? 0 : 1;
+        const triggerStart = from - kansoMatch[0].length + offset;
+        setKansoIndex(0);
+        setKansoState({
+          open: true,
+          query: kansoMatch[1] ?? "",
+          from: triggerStart,
+          to: from,
+          position: getCursorCoords(from),
+        });
+        return;
+      }
+      setKansoState((p) => (p.open ? CLOSED_TRIGGER : p));
     },
     [getCursorCoords, onAddInlineComment]
   );
@@ -478,6 +589,25 @@ export const RichDocumentEditor = forwardRef<
   applySlashSelectionRef.current = applySlashCommand;
   const applyWikiSelectionRef = useRef(applyWikiLink);
   applyWikiSelectionRef.current = applyWikiLink;
+
+  const applyKansoTicket = useCallback(
+    (issue: KansoIssueSummary) => {
+      if (!editor) return;
+      const { from, to } = kansoStateRef.current;
+      setKansoState(CLOSED_TRIGGER);
+
+      editor
+        .chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent(`#${issue.identifier} `)
+        .run();
+    },
+    [editor]
+  );
+
+  const applyKansoSelectionRef = useRef(applyKansoTicket);
+  applyKansoSelectionRef.current = applyKansoTicket;
 
   // Sync editor content when switching documents or resetting workspace
   useEffect(() => {
@@ -651,6 +781,19 @@ export const RichDocumentEditor = forwardRef<
           onSelectDoc={(docTitle) => applyWikiLink(docTitle, false)}
           onCreateAndLink={(docTitle) => applyWikiLink(docTitle, true)}
           onHover={setWikiIndex}
+        />
+      )}
+
+      {kansoState.open && (
+        <KansoTicketMenu
+          query={kansoState.query}
+          issues={kansoIssues}
+          loading={kansoLoading}
+          unreachable={kansoUnreachable}
+          activeIndex={kansoIndex}
+          position={kansoState.position}
+          onSelectTicket={applyKansoTicket}
+          onHover={setKansoIndex}
         />
       )}
     </div>
