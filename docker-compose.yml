@@ -14,9 +14,10 @@ services:
       BRIEF_DATA_DIR: /app/data
       BRIEF_UPLOADS_DIR: /app/uploads
       BRIEF_API_TOKEN: ${BRIEF_API_TOKEN:-}
-      # Leave DATABASE_URL empty for zero-config SQLite (/app/data/brief.db).
-      # Set DATABASE_URL=postgresql://... (and run with `--profile postgres`) for PostgreSQL.
-      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-brief}:${POSTGRES_PASSWORD:-brief}@postgres:5432/${POSTGRES_DB:-brief}}
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - brief_data:/app/data
       - brief_uploads:/app/uploads
@@ -30,7 +31,6 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: brief-postgres
-    profiles: ["postgres"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
