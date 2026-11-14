@@ -98,6 +98,15 @@ export function BriefEditor() {
           spaces?: Space[];
           documents?: BriefDocument[];
         };
+        if (serverData.spaces?.length) {
+          setSpaces((prev) => {
+            const localIds = new Set(prev.map((s) => s.id));
+            const newSpaces = serverData.spaces!.filter(
+              (s) => !localIds.has(s.id)
+            );
+            return newSpaces.length > 0 ? [...prev, ...newSpaces] : prev;
+          });
+        }
         if (serverData.documents?.length) {
           setDocuments((prev) => {
             const localIds = new Set(prev.map((d) => d.id));

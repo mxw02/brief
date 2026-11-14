@@ -197,6 +197,30 @@ export async function verifyApiToken(
   });
 }
 
+export async function createSpaceInStore(name: string): Promise<Space> {
+  const cleanName = name.trim() || "New Space";
+  const slug =
+    cleanName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "space";
+
+  return withStoreLock(async () => {
+    const store = await readRawStore();
+    const existing = store.spaces.find((s) => s.slug === slug);
+    if (existing) return existing;
+
+    const space: Space = {
+      id: `space-${crypto.randomUUID().slice(0, 8)}`,
+      name: cleanName,
+      slug,
+    };
+    store.spaces.push(space);
+    await writeRawStore(store);
+    return space;
+  });
+}
+
 export interface ProposeDraftInput {
   title: string;
   content: string;

@@ -3,6 +3,7 @@ import { requireAgentAuth } from "@/lib/agent-auth";
 import { buildAgentContextMarkdown } from "@/lib/agent-context";
 import { buildSearchIndex, searchDocuments } from "@/lib/search-index";
 import {
+  createSpaceInStore,
   isAdrOrSpecDocument,
   proposeAgentDraft,
   readWorkspaceStore,
@@ -59,6 +60,20 @@ const MCP_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {},
+    },
+  },
+  {
+    name: "create_space",
+    description: "Create a new Space in Brief (or return existing Space with the same slug).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Display name of the new Space",
+        },
+      },
+      required: ["name"],
     },
   },
   {
@@ -243,6 +258,20 @@ export async function POST(request: NextRequest) {
       }));
       return jsonRpcResult(id, {
         content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+      });
+    }
+
+    if (toolName === "create_space") {
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      if (!name) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [{ type: "text", text: "name must be a non-empty string" }],
+        });
+      }
+      const space = await createSpaceInStore(name);
+      return jsonRpcResult(id, {
+        content: [{ type: "text", text: JSON.stringify(space, null, 2) }],
       });
     }
 
