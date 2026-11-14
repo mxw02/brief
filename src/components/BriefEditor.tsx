@@ -80,6 +80,10 @@ export function BriefEditor() {
   const [authLoading, setAuthLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [ssoInfo, setSsoInfo] = useState<{
+    enabled: boolean;
+    providerName: string;
+  }>({ enabled: false, providerName: "Keycloak" });
   const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
@@ -131,9 +135,11 @@ export function BriefEditor() {
         const data = (await res.json()) as {
           user?: PublicUser | null;
           needsSetup?: boolean;
+          sso?: { enabled: boolean; providerName: string };
         };
         if (!active) return;
         setNeedsSetup(Boolean(data.needsSetup));
+        if (data.sso) setSsoInfo(data.sso);
         setCurrentUser(data.user ?? null);
         if (data.user) {
           await loadWorkspaceForUser();
@@ -658,6 +664,7 @@ export function BriefEditor() {
     return (
       <AuthScreen
         needsSetup={needsSetup}
+        sso={ssoInfo}
         onAuthenticated={(user) => {
           setNeedsSetup(false);
           setCurrentUser(user);
