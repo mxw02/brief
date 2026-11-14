@@ -5,7 +5,7 @@ import { Search } from "lucide-react";
 
 export interface PaletteAction {
   id: string;
-  group: "View" | "Insert" | "Document";
+  group: "View" | "Insert" | "Template" | "Document";
   label: string;
   description: string;
   shortcut?: string;

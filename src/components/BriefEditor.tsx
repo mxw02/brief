@@ -343,8 +343,13 @@ export function BriefEditor() {
       },
       ...SLASH_COMMANDS.map((cmd) => ({
         id: `insert-${cmd.id}`,
-        group: "Insert" as const,
-        label: `Insert ${cmd.label}`,
+        group: (cmd.category === "template" ? "Template" : "Insert") as
+          | "Template"
+          | "Insert",
+        label:
+          cmd.category === "template"
+            ? `Template: ${cmd.label}`
+            : `Insert ${cmd.label}`,
         description: cmd.description,
         shortcut: cmd.shortcut,
         onRun: () => insertSnippetAtCursor(cmd.snippet, cmd.cursorOffset),
