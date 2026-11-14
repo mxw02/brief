@@ -60,8 +60,9 @@ export function BriefEditor() {
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
   const hydratedRef = useRef(false);
+  const lastServerSyncRef = useRef<string>("");
 
-  // Restore persisted workspace on mount and sync with server store (for agent Drafts)
+  // Restore persisted workspace on mount and sync with server store (for agent Spaces & Drafts)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_WORKSPACE_KEY);
@@ -124,8 +125,16 @@ export function BriefEditor() {
     };
 
     syncFromServer();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        syncFromServer();
+      }
+    }, 4000);
     window.addEventListener("focus", syncFromServer);
-    return () => window.removeEventListener("focus", syncFromServer);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", syncFromServer);
+    };
   }, []);
 
   useEffect(() => {
@@ -139,11 +148,15 @@ export function BriefEditor() {
     }
 
     if (!hydratedRef.current) return;
+    const payload = JSON.stringify({ spaces, documents });
+    if (payload === lastServerSyncRef.current) return;
+
     const timer = setTimeout(() => {
+      lastServerSyncRef.current = payload;
       fetch("/api/workspace", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spaces, documents }),
+        body: payload,
       }).catch(() => undefined);
     }, 600);
     return () => clearTimeout(timer);
