@@ -1,14 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
   Bot,
   Check,
   Command,
-  Copy,
   FilePlus2,
-  Maximize2,
   Minimize2,
   PanelLeft,
   RotateCcw,
@@ -57,7 +54,6 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [copiedDoc, setCopiedDoc] = useState(false);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
@@ -244,8 +240,6 @@ export function BriefEditor() {
   const handleCopyDocument = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(`# ${title}\n\n${content}`);
-      setCopiedDoc(true);
-      setTimeout(() => setCopiedDoc(false), 1800);
     } catch {
       // Clipboard may be unavailable
     }
@@ -520,41 +514,10 @@ export function BriefEditor() {
                 ) : (
                   <>
                     <Bot className="h-3.5 w-3.5" />
-                    <span className="hidden lg:inline">Agent Context</span>
+                    <span className="hidden lg:inline">Copy Context</span>
                   </>
                 )}
               </button>
-
-              <button
-                type="button"
-                onClick={handleCopyDocument}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100/70"
-                title="Copy Markdown"
-              >
-                {copiedDoc ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFocusMode(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-800"
-                title="Focus Mode (Cmd+\)"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Focus</span>
-              </button>
-
-              <Link
-                href="/api/health"
-                className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 xl:inline-flex"
-                title="Healthcheck"
-              >
-                <span className="h-2 w-2 rounded-full bg-emerald-600" />
-              </Link>
             </div>
           </div>
         </header>
