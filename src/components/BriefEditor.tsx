@@ -6,10 +6,12 @@ import {
   Check,
   Command,
   FilePlus2,
+  Lock,
   LogOut,
   MessageSquare,
   Minimize2,
   PanelLeft,
+  RefreshCw,
   RotateCcw,
   Search,
   User,
@@ -76,6 +78,7 @@ export function BriefEditor() {
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const [authLoading, setAuthLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [needsSetup, setNeedsSetup] = useState(false);
   const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
 
@@ -85,6 +88,7 @@ export function BriefEditor() {
 
   const loadWorkspaceForUser = useCallback(async () => {
     hydratedRef.current = false;
+    setWorkspaceLoading(true);
     try {
       const res = await fetch("/api/workspace");
       if (!res.ok) return;
@@ -114,6 +118,7 @@ export function BriefEditor() {
       // Ignore network errors
     } finally {
       hydratedRef.current = true;
+      setWorkspaceLoading(false);
     }
   }, []);
 
@@ -659,6 +664,69 @@ export function BriefEditor() {
           void loadWorkspaceForUser();
         }}
       />
+    );
+  }
+
+  if (workspaceLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9F9F8] text-sm text-zinc-500">
+        Lade freigegebene Spaces...
+      </div>
+    );
+  }
+
+  if (spaces.length === 0 && currentUser.role !== "admin") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F9F9F8] px-4 py-12">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-7 text-center shadow-sm">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h1 className="text-lg font-semibold text-zinc-900">
+            Noch kein Zugriff auf einen Space
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+            Du bist als{" "}
+            <span className="font-medium text-zinc-900">
+              {currentUser.name}
+            </span>{" "}
+            ({currentUser.email}) angemeldet, aber dir wurde noch kein Space
+            freigegeben. Bitte wende dich an deinen Administrator, damit er dir
+            Zugriff auf die benötigten Spaces erteilt.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch("/api/auth/session");
+                if (res.ok) {
+                  const data = (await res.json()) as {
+                    user?: PublicUser | null;
+                  };
+                  if (data.user) setCurrentUser(data.user);
+                }
+                await loadWorkspaceForUser();
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-teal-700 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-teal-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Zugriff erneut prüfen
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                setCurrentUser(null);
+                hydratedRef.current = false;
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-4 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-50"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Abmelden
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 
