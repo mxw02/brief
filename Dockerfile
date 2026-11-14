@@ -23,11 +23,13 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+ENV BRIEF_DATA_DIR=/app/data
+ENV BRIEF_UPLOADS_DIR=/app/uploads
 
 RUN addgroup --system --gid 1001 brief && \
     adduser --system --uid 1001 brief && \
-    mkdir -p /app/uploads && \
-    chown -R brief:brief /app/uploads
+    mkdir -p /app/data /app/uploads && \
+    chown -R brief:brief /app/data /app/uploads
 
 COPY --from=builder --chown=brief:brief /app/public ./public
 COPY --from=builder --chown=brief:brief /app/.next/standalone ./
@@ -35,5 +37,8 @@ COPY --from=builder --chown=brief:brief /app/.next/static ./.next/static
 
 USER brief
 EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "server.js"]

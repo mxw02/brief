@@ -1,134 +1,41 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import {
-  DEFAULT_DOCUMENTS,
-  DEFAULT_SPACES,
-  type BriefDocument,
-  type Space,
-} from "./workspace";
+  dbCreateToken,
+  dbFindAndTouchToken,
+  dbInsertDocument,
+  dbInsertSpace,
+  dbListTokens,
+  dbReadWorkspace,
+  dbRevokeToken,
+  dbWriteWorkspace,
+  type ApiTokenRecord,
+  type PublicApiToken,
+} from "./db";
+import type { BriefDocument, Space } from "./workspace";
 
-export interface ApiTokenRecord {
-  id: string;
-  name: string;
-  prefix: string;
-  hash: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-}
-
-export interface PublicApiToken {
-  id: string;
-  name: string;
-  prefix: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-}
-
-export interface WorkspaceStoreData {
-  spaces: Space[];
-  documents: BriefDocument[];
-  tokens: ApiTokenRecord[];
-}
-
-function getStoreFilePath(): string {
-  const dataDir =
-    process.env.BRIEF_DATA_DIR?.trim() ||
-    path.join(process.cwd(), ".brief-data");
-  return path.join(dataDir, "workspace.json");
-}
+export type { ApiTokenRecord, PublicApiToken };
 
 function hashToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
-}
-
-function createInitialStore(): WorkspaceStoreData {
-  return {
-    spaces: DEFAULT_SPACES,
-    documents: DEFAULT_DOCUMENTS.map((doc) => ({
-      ...doc,
-      status: doc.status ?? "published",
-    })),
-    tokens: [],
-  };
-}
-
-// Serialize writes in-process so concurrent API/MCP calls do not race on disk
-let writeQueue: Promise<unknown> = Promise.resolve();
-
-function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = writeQueue.then(fn, fn);
-  writeQueue = next.catch(() => undefined);
-  return next;
-}
-
-async function readRawStore(): Promise<WorkspaceStoreData> {
-  const filePath = getStoreFilePath();
-  try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<WorkspaceStoreData>;
-    return {
-      spaces:
-        Array.isArray(parsed.spaces) && parsed.spaces.length > 0
-          ? parsed.spaces
-          : DEFAULT_SPACES,
-      documents:
-        Array.isArray(parsed.documents) && parsed.documents.length > 0
-          ? parsed.documents
-          : DEFAULT_DOCUMENTS,
-      tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
-    };
-  } catch {
-    const initial = createInitialStore();
-    await writeRawStore(initial);
-    return initial;
-  }
-}
-
-async function writeRawStore(data: WorkspaceStoreData): Promise<void> {
-  const filePath = getStoreFilePath();
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf8");
-  await fs.rename(tmpPath, filePath);
 }
 
 export async function readWorkspaceStore(): Promise<{
   spaces: Space[];
   documents: BriefDocument[];
 }> {
-  const store = await readRawStore();
-  return {
-    spaces: store.spaces,
-    documents: store.documents,
-  };
+  return dbReadWorkspace();
 }
 
 export async function writeWorkspaceContent(
   spaces: Space[],
   documents: BriefDocument[]
 ): Promise<{ spaces: Space[]; documents: BriefDocument[] }> {
-  return withStoreLock(async () => {
-    const store = await readRawStore();
-    const updated: WorkspaceStoreData = {
-      spaces,
-      documents,
-      tokens: store.tokens,
-    };
-    await writeRawStore(updated);
-    return { spaces: updated.spaces, documents: updated.documents };
-  });
+  await dbWriteWorkspace(spaces, documents);
+  return { spaces, documents };
 }
 
 export async function listApiTokens(): Promise<PublicApiToken[]> {
-  const store = await readRawStore();
-  return store.tokens.map(({ id, name, prefix, createdAt, lastUsedAt }) => ({
-    id,
-    name,
-    prefix,
-    createdAt,
-    lastUsedAt,
-  }));
+  return dbListTokens();
 }
 
 export async function createApiToken(name: string): Promise<{
@@ -146,11 +53,7 @@ export async function createApiToken(name: string): Promise<{
     lastUsedAt: null,
   };
 
-  await withStoreLock(async () => {
-    const store = await readRawStore();
-    store.tokens.unshift(record);
-    await writeRawStore(store);
-  });
+  await dbCreateToken(record);
 
   return {
     token: rawToken,
@@ -165,14 +68,7 @@ export async function createApiToken(name: string): Promise<{
 }
 
 export async function revokeApiToken(id: string): Promise<boolean> {
-  return withStoreLock(async () => {
-    const store = await readRawStore();
-    const before = store.tokens.length;
-    store.tokens = store.tokens.filter((t) => t.id !== id);
-    if (store.tokens.length === before) return false;
-    await writeRawStore(store);
-    return true;
-  });
+  return dbRevokeToken(id);
 }
 
 export async function verifyApiToken(
@@ -186,15 +82,9 @@ export async function verifyApiToken(
     return { valid: true, agentName: "Env API Token" };
   }
 
-  const digest = hashToken(trimmed);
-  return withStoreLock(async () => {
-    const store = await readRawStore();
-    const match = store.tokens.find((t) => t.hash === digest);
-    if (!match) return { valid: false };
-    match.lastUsedAt = new Date().toISOString();
-    await writeRawStore(store);
-    return { valid: true, agentName: match.name };
-  });
+  const name = await dbFindAndTouchToken(hashToken(trimmed));
+  if (!name) return { valid: false };
+  return { valid: true, agentName: name };
 }
 
 export async function createSpaceInStore(name: string): Promise<Space> {
@@ -205,20 +95,17 @@ export async function createSpaceInStore(name: string): Promise<Space> {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "") || "space";
 
-  return withStoreLock(async () => {
-    const store = await readRawStore();
-    const existing = store.spaces.find((s) => s.slug === slug);
-    if (existing) return existing;
+  const { spaces } = await dbReadWorkspace();
+  const existing = spaces.find((s) => s.slug === slug);
+  if (existing) return existing;
 
-    const space: Space = {
-      id: `space-${crypto.randomUUID().slice(0, 8)}`,
-      name: cleanName,
-      slug,
-    };
-    store.spaces.push(space);
-    await writeRawStore(store);
-    return space;
-  });
+  const space: Space = {
+    id: `space-${crypto.randomUUID().slice(0, 8)}`,
+    name: cleanName,
+    slug,
+  };
+  await dbInsertSpace(space);
+  return space;
 }
 
 export interface ProposeDraftInput {
@@ -237,42 +124,41 @@ export interface ProposeDraftInput {
 export async function proposeAgentDraft(
   input: ProposeDraftInput
 ): Promise<BriefDocument> {
-  return withStoreLock(async () => {
-    const store = await readRawStore();
-    const targetDoc = input.targetDocId
-      ? store.documents.find((d) => d.id === input.targetDocId)
-      : undefined;
+  const { spaces, documents } = await dbReadWorkspace();
+  const targetDoc = input.targetDocId
+    ? documents.find((d) => d.id === input.targetDocId)
+    : undefined;
 
-    const resolvedSpaceId =
-      targetDoc?.spaceId ||
-      (input.spaceId && store.spaces.some((s) => s.id === input.spaceId)
-        ? input.spaceId
-        : store.spaces[0]?.id || "space-eng");
+  const resolvedSpaceId =
+    targetDoc?.spaceId ||
+    (input.spaceId && spaces.some((s) => s.id === input.spaceId)
+      ? input.spaceId
+      : spaces[0]?.id || "space-eng");
 
-    const resolvedParentId =
-      input.parentId !== undefined
-        ? input.parentId
-        : targetDoc
-          ? targetDoc.id
-          : null;
+  const resolvedParentId =
+    input.parentId !== undefined
+      ? input.parentId
+      : targetDoc
+        ? targetDoc.id
+        : null;
 
-    const draft: BriefDocument = {
-      id: `doc-draft-${crypto.randomUUID().slice(0, 8)}`,
-      spaceId: resolvedSpaceId,
-      parentId: resolvedParentId,
-      title: input.title.trim() || (targetDoc ? `${targetDoc.title} (Draft)` : "Agent Draft"),
-      content: input.content,
-      updatedAt: new Date().toISOString(),
-      status: "draft",
-      proposedBy: input.proposedBy.trim() || "AI Agent",
-      proposalTargetId: targetDoc?.id,
-      proposalSummary: input.summary?.trim() || undefined,
-    };
+  const draft: BriefDocument = {
+    id: `doc-draft-${crypto.randomUUID().slice(0, 8)}`,
+    spaceId: resolvedSpaceId,
+    parentId: resolvedParentId,
+    title:
+      input.title.trim() ||
+      (targetDoc ? `${targetDoc.title} (Draft)` : "Agent Draft"),
+    content: input.content,
+    updatedAt: new Date().toISOString(),
+    status: "draft",
+    proposedBy: input.proposedBy.trim() || "AI Agent",
+    proposalTargetId: targetDoc?.id,
+    proposalSummary: input.summary?.trim() || undefined,
+  };
 
-    store.documents.push(draft);
-    await writeRawStore(store);
-    return draft;
-  });
+  await dbInsertDocument(draft);
+  return draft;
 }
 
 export function isAdrOrSpecDocument(doc: BriefDocument): boolean {
