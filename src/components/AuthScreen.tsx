@@ -1,15 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { Lock, LogIn, ShieldCheck, UserPlus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { KeyRound, Lock, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 import type { PublicUser } from "@/lib/workspace";
 
 interface AuthScreenProps {
   needsSetup: boolean;
+  sso?: { enabled: boolean; providerName: string };
   onAuthenticated: (user: PublicUser) => void;
 }
 
-export function AuthScreen({ needsSetup, onAuthenticated }: AuthScreenProps) {
+export function AuthScreen({
+  needsSetup,
+  sso,
+  onAuthenticated,
+}: AuthScreenProps) {
   const [mode, setMode] = useState<"login" | "register">(
     needsSetup ? "register" : "login"
   );
@@ -18,6 +23,15 @@ export function AuthScreen({ needsSetup, onAuthenticated }: AuthScreenProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (authError) {
+      setError(`SSO-Anmeldung fehlgeschlagen (${authError})`);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -73,6 +87,23 @@ export function AuthScreen({ needsSetup, onAuthenticated }: AuthScreenProps) {
             </p>
           </div>
         </div>
+
+        {sso?.enabled && (
+          <div className="mb-5">
+            <a
+              href="/api/auth/oidc/login"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-teal-200 bg-teal-50/70 px-4 py-2.5 text-sm font-medium text-teal-800 transition-colors hover:bg-teal-100/70"
+            >
+              <KeyRound className="h-4 w-4 text-teal-700" />
+              Mit {sso.providerName} (SSO) anmelden
+            </a>
+            <div className="my-4 flex items-center gap-3 text-[11px] text-zinc-400">
+              <div className="h-px flex-1 bg-zinc-200" />
+              <span>oder mit E-Mail</span>
+              <div className="h-px flex-1 bg-zinc-200" />
+            </div>
+          </div>
+        )}
 
         {!needsSetup && (
           <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-zinc-100 p-1 text-xs font-medium">
