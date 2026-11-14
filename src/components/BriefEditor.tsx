@@ -22,7 +22,11 @@ import {
   DEFAULT_SPACES,
   findBacklinks,
   getDocumentAncestors,
+  normalizeDocumentStatus,
+  SPEC_STATUS_META,
+  SPEC_STATUSES,
   type BriefDocument,
+  type DocumentStatus,
   type Space,
 } from "@/lib/workspace";
 import { AgentMcpModal } from "./AgentMcpModal";
@@ -181,7 +185,7 @@ export function BriefEditor() {
   const content = activeDoc?.content ?? "";
 
   const updateActiveDoc = useCallback(
-    (patch: Partial<Pick<BriefDocument, "title" | "content">>) => {
+    (patch: Partial<Pick<BriefDocument, "title" | "content" | "status">>) => {
       const now = new Date().toISOString();
       setDocuments((prev) =>
         prev.map((doc) =>
@@ -226,6 +230,7 @@ export function BriefEditor() {
         title: docTitle,
         content: `## Overview\n\nStart writing **${docTitle}**...\n`,
         updatedAt: new Date().toISOString(),
+        status: "draft",
       };
       setDocuments((prev) => [...prev, newDoc]);
       setActiveDocId(newDoc.id);
@@ -295,6 +300,7 @@ export function BriefEditor() {
         title: docTitle,
         content: `## Overview\n\n`,
         updatedAt: new Date().toISOString(),
+        status: "draft",
       };
       setDocuments((prev) => [...prev, newDoc]);
     },
@@ -497,7 +503,7 @@ export function BriefEditor() {
           d.id === draft.id
             ? {
                 ...d,
-                status: "published",
+                status: "approved",
                 proposedBy: undefined,
                 proposalTargetId: undefined,
                 proposalSummary: undefined,
@@ -663,7 +669,12 @@ export function BriefEditor() {
 
         <main className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-8">
           <article className="mx-auto flex w-full max-w-4xl flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
-            {activeDoc?.status === "draft" && (
+            {activeDoc?.status === "draft" &&
+              Boolean(
+                activeDoc.proposedBy ||
+                  activeDoc.proposalTargetId ||
+                  activeDoc.proposalSummary
+              ) && (
               <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold">
@@ -703,18 +714,51 @@ export function BriefEditor() {
                 aria-label="Page title"
                 className="w-full bg-transparent text-3xl font-bold tracking-tight text-zinc-900 placeholder:text-zinc-300 focus:outline-none sm:text-4xl"
               />
-              <button
-                type="button"
-                onClick={() => {
-                  setSpaces(DEFAULT_SPACES);
-                  setDocuments(DEFAULT_DOCUMENTS);
-                  setActiveDocId(DEFAULT_DOCUMENTS[0].id);
-                }}
-                className="mt-1 shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-                title="Reset demo workspace"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </button>
+              <div className="mt-1 flex shrink-0 items-center gap-2">
+                {(() => {
+                  const currentStatus = normalizeDocumentStatus(
+                    activeDoc?.status
+                  );
+                  const meta = SPEC_STATUS_META[currentStatus];
+                  return (
+                    <div
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${meta.badgeClass}`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`}
+                      />
+                      <select
+                        aria-label="Document status"
+                        value={currentStatus}
+                        onChange={(e) =>
+                          updateActiveDoc({
+                            status: e.target.value as DocumentStatus,
+                          })
+                        }
+                        className="cursor-pointer bg-transparent pr-1 font-medium focus:outline-none"
+                      >
+                        {SPEC_STATUSES.map((st) => (
+                          <option key={st} value={st} className="text-zinc-900">
+                            {SPEC_STATUS_META[st].label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpaces(DEFAULT_SPACES);
+                    setDocuments(DEFAULT_DOCUMENTS);
+                    setActiveDocId(DEFAULT_DOCUMENTS[0].id);
+                  }}
+                  className="shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                  title="Reset demo workspace"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
 
             <RichDocumentEditor

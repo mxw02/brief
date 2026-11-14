@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import {
   DEFAULT_DOCUMENTS,
   DEFAULT_SPACES,
+  normalizeDocumentStatus,
   type BriefDocument,
   type Space,
 } from "./workspace";
@@ -270,7 +271,7 @@ function mapDocRow(row: Record<string, unknown>): BriefDocument {
     title: String(row.title),
     content: String(row.content),
     updatedAt: String(row.updated_at),
-    status: row.status === "draft" ? "draft" : "published",
+    status: normalizeDocumentStatus(row.status ? String(row.status) : null),
     ...(row.proposed_by ? { proposedBy: String(row.proposed_by) } : {}),
     ...(row.proposal_target_id
       ? { proposalTargetId: String(row.proposal_target_id) }

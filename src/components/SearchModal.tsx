@@ -6,7 +6,13 @@ import {
   searchDocuments,
   type SearchIndexedDoc,
 } from "@/lib/search-index";
-import type { Space } from "@/lib/workspace";
+import {
+  normalizeDocumentStatus,
+  SPEC_STATUS_META,
+  SPEC_STATUSES,
+  type DocumentStatus,
+  type Space,
+} from "@/lib/workspace";
 
 interface SearchModalProps {
   open: boolean;
@@ -63,18 +69,29 @@ export function SearchModal({
 }: SearchModalProps) {
   const [query, setQuery] = useState("");
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<DocumentStatus | null>(
+    null
+  );
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { results } = useMemo(
+  const { results: rawResults } = useMemo(
     () => searchDocuments(index, query, selectedSpaceId),
     [index, query, selectedSpaceId]
   );
+
+  const results = useMemo(() => {
+    if (!selectedStatus) return rawResults;
+    return rawResults.filter(
+      (r) => normalizeDocumentStatus(r.doc.status) === selectedStatus
+    );
+  }, [rawResults, selectedStatus]);
 
   useEffect(() => {
     if (open) {
       setQuery("");
       setSelectedSpaceId(null);
+      setSelectedStatus(null);
       setActiveIndex(0);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -181,6 +198,43 @@ export function SearchModal({
               {space.name}
             </button>
           ))}
+          <span className="mx-1 h-3.5 w-px bg-zinc-200" />
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedStatus(null);
+              setActiveIndex(0);
+            }}
+            className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+              selectedStatus === null
+                ? "border-teal-200 bg-teal-50 text-teal-800"
+                : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900"
+            }`}
+          >
+            All Statuses
+          </button>
+          {SPEC_STATUSES.map((st) => {
+            const meta = SPEC_STATUS_META[st];
+            const active = selectedStatus === st;
+            return (
+              <button
+                key={st}
+                type="button"
+                onClick={() => {
+                  setSelectedStatus(active ? null : st);
+                  setActiveIndex(0);
+                }}
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  active
+                    ? meta.badgeClass
+                    : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-900"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+                {meta.label}
+              </button>
+            );
+          })}
         </div>
 
         <div className="max-h-96 overflow-y-auto p-2">
@@ -219,6 +273,19 @@ export function SearchModal({
                           terms={result.matchedTerms}
                         />
                       </span>
+                      {(() => {
+                        const meta =
+                          SPEC_STATUS_META[
+                            normalizeDocumentStatus(result.doc.status)
+                          ];
+                        return (
+                          <span
+                            className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
+                          >
+                            {meta.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <span
                       className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${
