@@ -4,6 +4,8 @@ export interface Space {
   slug: string;
 }
 
+export type DocumentStatus = "published" | "draft";
+
 export interface BriefDocument {
   id: string;
   spaceId: string;
@@ -11,6 +13,10 @@ export interface BriefDocument {
   title: string;
   content: string;
   updatedAt: string;
+  status?: DocumentStatus;
+  proposedBy?: string;
+  proposalTargetId?: string;
+  proposalSummary?: string;
 }
 
 export interface Backlink {

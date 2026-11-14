@@ -25,6 +25,7 @@ import {
   type BriefDocument,
   type Space,
 } from "@/lib/workspace";
+import { AgentMcpModal } from "./AgentMcpModal";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import {
@@ -54,37 +55,86 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const richEditorRef = useRef<RichDocumentEditorHandle>(null);
+  const hydratedRef = useRef(false);
+  const lastServerSyncRef = useRef<string>("");
 
-  // Restore persisted workspace on mount
+  // Restore persisted workspace on mount and sync with server store (for agent Spaces & Drafts)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_WORKSPACE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        spaces?: Space[];
-        documents?: BriefDocument[];
-        activeDocId?: string;
-      };
-      if (parsed.spaces?.length && parsed.documents?.length) {
-        setSpaces(parsed.spaces);
-        setDocuments(
-          parsed.documents.map((d) => ({ ...d, parentId: d.parentId ?? null }))
-        );
-        if (
-          parsed.activeDocId &&
-          parsed.documents.some((d) => d.id === parsed.activeDocId)
-        ) {
-          setActiveDocId(parsed.activeDocId);
-        } else {
-          setActiveDocId(parsed.documents[0].id);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          spaces?: Space[];
+          documents?: BriefDocument[];
+          activeDocId?: string;
+        };
+        if (parsed.spaces?.length && parsed.documents?.length) {
+          setSpaces(parsed.spaces);
+          setDocuments(
+            parsed.documents.map((d) => ({ ...d, parentId: d.parentId ?? null }))
+          );
+          if (
+            parsed.activeDocId &&
+            parsed.documents.some((d) => d.id === parsed.activeDocId)
+          ) {
+            setActiveDocId(parsed.activeDocId);
+          } else {
+            setActiveDocId(parsed.documents[0].id);
+          }
         }
       }
     } catch {
       // Ignore storage errors
     }
+
+    const syncFromServer = async () => {
+      try {
+        const res = await fetch("/api/workspace");
+        if (!res.ok) return;
+        const serverData = (await res.json()) as {
+          spaces?: Space[];
+          documents?: BriefDocument[];
+        };
+        if (serverData.spaces?.length) {
+          setSpaces((prev) => {
+            const localIds = new Set(prev.map((s) => s.id));
+            const newSpaces = serverData.spaces!.filter(
+              (s) => !localIds.has(s.id)
+            );
+            return newSpaces.length > 0 ? [...prev, ...newSpaces] : prev;
+          });
+        }
+        if (serverData.documents?.length) {
+          setDocuments((prev) => {
+            const localIds = new Set(prev.map((d) => d.id));
+            const newDrafts = serverData.documents!.filter(
+              (d) => d.status === "draft" && !localIds.has(d.id)
+            );
+            return newDrafts.length > 0 ? [...prev, ...newDrafts] : prev;
+          });
+        }
+      } catch {
+        // Ignore background sync errors
+      } finally {
+        hydratedRef.current = true;
+      }
+    };
+
+    syncFromServer();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        syncFromServer();
+      }
+    }, 4000);
+    window.addEventListener("focus", syncFromServer);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", syncFromServer);
+    };
   }, []);
 
   useEffect(() => {
@@ -96,6 +146,20 @@ export function BriefEditor() {
     } catch {
       // Ignore storage errors
     }
+
+    if (!hydratedRef.current) return;
+    const payload = JSON.stringify({ spaces, documents });
+    if (payload === lastServerSyncRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastServerSyncRef.current = payload;
+      fetch("/api/workspace", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).catch(() => undefined);
+    }, 600);
+    return () => clearTimeout(timer);
   }, [spaces, documents, activeDocId]);
 
   const activeDoc = useMemo(
@@ -375,6 +439,13 @@ export function BriefEditor() {
         onRun: handleCopyDocument,
       },
       {
+        id: "agent-mcp-settings",
+        group: "Document",
+        label: "Agent API & MCP Settings",
+        description: "Manage API tokens and MCP configuration for AI agents",
+        onRun: () => setMcpModalOpen(true),
+      },
+      {
         id: "doc-reset",
         group: "Document",
         label: "Reset Demo Workspace",
@@ -399,6 +470,45 @@ export function BriefEditor() {
     spaces,
     title,
   ]);
+
+  const handleApproveDraft = useCallback(
+    (draft: BriefDocument) => {
+      const now = new Date().toISOString();
+      if (
+        draft.proposalTargetId &&
+        documents.some((d) => d.id === draft.proposalTargetId)
+      ) {
+        const targetId = draft.proposalTargetId;
+        setDocuments((prev) =>
+          prev
+            .filter((d) => d.id !== draft.id)
+            .map((d) =>
+              d.id === targetId
+                ? { ...d, content: draft.content, updatedAt: now }
+                : d
+            )
+        );
+        setActiveDocId(targetId);
+        return;
+      }
+
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === draft.id
+            ? {
+                ...d,
+                status: "published",
+                proposedBy: undefined,
+                proposalTargetId: undefined,
+                proposalSummary: undefined,
+                updatedAt: now,
+              }
+            : d
+        )
+      );
+    },
+    [documents]
+  );
 
   const stats = useMemo(() => {
     const trimmed = content.trim();
@@ -547,11 +657,43 @@ export function BriefEditor() {
             onDeleteDoc={handleDeleteDoc}
             onCreateSpace={handleCreateSpace}
             onCopySpaceContext={handleCopySpaceContext}
+            onOpenAgentMcp={() => setMcpModalOpen(true)}
           />
         )}
 
         <main className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-8">
           <article className="mx-auto flex w-full max-w-4xl flex-1 flex-col rounded-2xl border border-zinc-200 bg-white px-6 py-7 shadow-2xs sm:px-10 sm:py-9">
+            {activeDoc?.status === "draft" && (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-900">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">
+                    Agent Draft Proposal
+                    {activeDoc.proposedBy ? ` · by ${activeDoc.proposedBy}` : ""}
+                  </div>
+                  {activeDoc.proposalSummary && (
+                    <p className="mt-0.5 text-amber-800/90">
+                      {activeDoc.proposalSummary}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleApproveDraft(activeDoc)}
+                    className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-800"
+                  >
+                    Approve &amp; Publish
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteDoc(activeDoc.id)}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100/60"
+                  >
+                    Discard Draft
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="mb-4 flex items-start justify-between gap-4 border-b border-zinc-100 pb-4">
               <input
                 type="text"
@@ -650,6 +792,11 @@ export function BriefEditor() {
         spaces={spaces}
         onClose={() => setSearchOpen(false)}
         onSelectDoc={setActiveDocId}
+      />
+
+      <AgentMcpModal
+        open={mcpModalOpen}
+        onClose={() => setMcpModalOpen(false)}
       />
     </div>
   );
