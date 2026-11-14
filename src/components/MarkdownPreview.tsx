@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Link2 } from "lucide-react";
+import {
+  BRIEF_DOC_HREF_PREFIX,
+  preprocessWikiLinks,
+  type Backlink,
+  type BriefDocument,
+} from "@/lib/workspace";
+import { BacklinksPanel } from "./BacklinksPanel";
 import { MermaidDiagram } from "./MermaidDiagram";
 
 interface CodeBlockProps {
@@ -75,9 +82,29 @@ function extractText(node: ReactNode): string {
 
 interface MarkdownPreviewProps {
   content: string;
+  documents?: BriefDocument[];
+  backlinks?: Backlink[];
+  onNavigateDoc?: (docId: string) => void;
+  onOpenOrCreateWikiLink?: (targetTitle: string) => void;
 }
 
-export function MarkdownPreview({ content }: MarkdownPreviewProps) {
+export function MarkdownPreview({
+  content,
+  documents = [],
+  backlinks = [],
+  onNavigateDoc,
+  onOpenOrCreateWikiLink,
+}: MarkdownPreviewProps) {
+  const processedContent = useMemo(
+    () => preprocessWikiLinks(content),
+    [content]
+  );
+
+  const docTitles = useMemo(
+    () => new Set(documents.map((d) => d.title.trim().toLowerCase())),
+    [documents]
+  );
+
   return (
     <div className="brief-prose max-w-none text-zinc-800">
       <ReactMarkdown
@@ -119,16 +146,44 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
             </blockquote>
           ),
           hr: () => <hr className="my-6 border-zinc-200" />,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-teal-700 underline decoration-teal-700/30 underline-offset-2 hover:text-teal-800"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            if (href?.startsWith(BRIEF_DOC_HREF_PREFIX)) {
+              const targetTitle = decodeURIComponent(
+                href.slice(BRIEF_DOC_HREF_PREFIX.length)
+              );
+              const exists = docTitles.has(targetTitle.trim().toLowerCase());
+              return (
+                <button
+                  type="button"
+                  onClick={() => onOpenOrCreateWikiLink?.(targetTitle)}
+                  className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[0.9em] font-medium transition-colors ${
+                    exists
+                      ? "border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100"
+                      : "border-dashed border-amber-300 bg-amber-50/70 text-amber-800 hover:bg-amber-100/70"
+                  }`}
+                  title={
+                    exists
+                      ? `Open "${targetTitle}"`
+                      : `Create and open "${targetTitle}"`
+                  }
+                >
+                  <Link2 className="h-3 w-3 shrink-0" />
+                  <span>{children}</span>
+                </button>
+              );
+            }
+
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-teal-700 underline decoration-teal-700/30 underline-offset-2 hover:text-teal-800"
+              >
+                {children}
+              </a>
+            );
+          },
           table: ({ children }) => (
             <div className="my-4 overflow-x-auto rounded-xl border border-zinc-200 bg-white">
               <table className="w-full border-collapse text-left text-sm">
@@ -177,8 +232,12 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
           },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
+
+      {onNavigateDoc && (
+        <BacklinksPanel backlinks={backlinks} onNavigate={onNavigateDoc} />
+      )}
     </div>
   );
 }
