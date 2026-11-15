@@ -29,28 +29,22 @@
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2+
 
-### 1. Download configuration
+### 1. Download configuration & initialize secrets
 
 ```bash
-curl -O https://raw.githubusercontent.com/mxw02/brief/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/mxw02/brief/main/.env.example
-cp .env.example .env
+git clone https://github.com/mxw02/brief.git && cd brief
+./scripts/init.sh
 ```
 
-### 2. Configure environment variables
+The init script automatically creates `.env` from `.env.example` and generates secure random values for `AUTH_SECRET`, `POSTGRES_PASSWORD`, and `DATABASE_URL` (no manual `openssl` command required). Adjust `APP_URL`, `KANSO_API_URL`, or `OIDC_*` in `.env` if needed.
 
-Edit `.env` and set strong secrets (especially `POSTGRES_PASSWORD` and `AUTH_SECRET`):
-
-```bash
-# Example: generate a secure random secret
-openssl rand -base64 32
-```
-
-### 3. Start Brief
+### 2. Start Brief
 
 ```bash
 docker compose up -d
 ```
+
+Or combine both steps in one command: `./scripts/init.sh --up`.
 
 Brief will be available at `http://localhost:3000` (or the `APP_URL` configured in `.env`).
 
@@ -61,6 +55,38 @@ Pre-built multi-architecture images (`linux/amd64`, `linux/arm64`) are published
 - `ghcr.io/mxw02/brief:latest` — latest stable release
 - `ghcr.io/mxw02/brief:vX.Y.Z` — pinned semantic version release
 - `ghcr.io/mxw02/brief:develop` — latest development build from `develop`
+
+---
+
+## MCP Server (Model Context Protocol)
+
+Brief exposes a built-in HTTP MCP server (`JSON-RPC 2.0`) so AI coding agents can search documentation, read specs/ADRs, and propose draft updates safely.
+
+- **Endpoint:** `POST <APP_URL>/api/mcp` (`GET <APP_URL>/api/mcp` returns server info and available tools)
+- **Authentication:** `Authorization: Bearer <token>` — create a token in the Brief UI (**Agent MCP & API** modal) or set `BRIEF_API_TOKEN` in `.env`.
+
+### Client Configuration Example
+
+```json
+{
+  "mcpServers": {
+    "brief": {
+      "url": "http://localhost:3000/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <YOUR_BRIEF_API_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+- `search_docs` — Full-text search across docs, specs, and ADRs
+- `list_adrs` — List Architecture Decision Records and technical specs
+- `list_spaces` / `create_space` — List or create Spaces
+- `get_doc` — Read a document by ID or exact title (optionally with nested/linked Agent Context)
+- `propose_draft` / `list_drafts` — Propose or list agent draft updates for human review
 
 ---
 
