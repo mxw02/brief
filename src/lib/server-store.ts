@@ -133,7 +133,7 @@ export async function proposeAgentDraft(
     targetDoc?.spaceId ||
     (input.spaceId && spaces.some((s) => s.id === input.spaceId)
       ? input.spaceId
-      : spaces[0]?.id || "space-eng");
+      : spaces[0]?.id || "space-brief");
 
   const resolvedParentId =
     input.parentId !== undefined

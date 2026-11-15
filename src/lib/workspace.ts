@@ -113,32 +113,66 @@ export interface Backlink {
 }
 
 export const DEFAULT_SPACES: Space[] = [
-  { id: "space-eng", name: "Engineering", slug: "engineering" },
-  { id: "space-prod", name: "Product", slug: "product" },
-  { id: "space-comp", name: "Company", slug: "company" },
+  { id: "space-brief", name: "Brief", slug: "brief" },
 ];
 
 export const DEFAULT_DOCUMENTS: BriefDocument[] = [
   {
-    id: "doc-arch",
-    spaceId: "space-eng",
+    id: "doc-welcome",
+    spaceId: "space-brief",
     parentId: null,
-    title: "Brief Architecture & Editor Spec",
-    updatedAt: "2026-11-14T14:20:00.000Z",
-    content: `# Brief — Distraction-Free Documentation
+    title: "Welcome to Brief",
+    updatedAt: "2026-11-15T10:00:00.000Z",
+    content: `# Welcome to Brief
 
-Welcome to **Brief**, an open-source, self-hosted alternative to Confluence.
-Type \`/\` for **Slash Commands & Templates**, \`[[\` for **Wiki-Links**, or \`Cmd+K\` for the **Command Palette**.
+**Brief** is an open-source, self-hosted knowledge base built for clarity, speed, and seamless collaboration between humans and AI agents.
 
-## Connected Docs
+## What You Can Do Here
 
-- Deployment & storage details: [[Self-Hosting & Database Guide]]
-- Upcoming milestones: [[Q4 Product Roadmap]]
-- New to the team? Start with [[Team Onboarding]]
+- **Write without friction:** Use the distraction-free Markdown editor with \`/\` **Slash Commands**, code syntax highlighting, checklists, and **Mermaid** diagrams.
+- **Connect knowledge:** Link pages with \`[[Wiki-Links]]\` and explore automatic **Backlinks** instead of getting lost in deep folder trees.
+- **Find anything instantly:** Press \`Cmd+K\` (or \`Ctrl+K\`) to search across all pages and spaces.
+- **Collaborate safely:** Manage **Spaces**, **Roles**, **Draft Proposals**, and **SSO (OIDC)** from the top bar.
+- **Work with AI Agents:** Export any page as **Agent Context** in one click, or connect external agents via **MCP** and the **REST API**.
 
-## Code Example (Syntax Highlighting)
+## Guides in This Space
+
+- [[Editor, Wiki-Links & Search]] — Formatting, \`/\` commands, \`[[\` links, and keyboard shortcuts
+- [[Spaces, Permissions & SSO]] — Roles, space access, draft proposals, and OIDC login
+- [[AI Agents, MCP & REST API]] — Agent context export, API tokens, and \`/api/mcp\`
+- [[Self-Hosting & Configuration]] — Docker Compose, \`scripts/init.sh\`, and environment variables
+
+## How Brief Works
+
+\`\`\`mermaid
+flowchart LR
+  Author[Human / AI Agent] -->|Markdown & Wiki-Links| Editor[Brief Editor]
+  Editor -->|Publish or Propose| DB[(PostgreSQL / SQLite)]
+  Editor -->|1-Click Export / MCP| Agent[AI Workflows]
+\`\`\`
+`,
+  },
+  {
+    id: "doc-editor",
+    spaceId: "space-brief",
+    parentId: "doc-welcome",
+    title: "Editor, Wiki-Links & Search",
+    updatedAt: "2026-11-15T10:00:00.000Z",
+    content: `# Editor, Wiki-Links & Search
+
+Brief combines a fast, clean writing experience with structured linking and instant search.
+
+## Slash Commands & Formatting
+
+Type \`/\` on a new line in the editor to insert:
+
+- Headings, bullet lists, numbered lists, and task checklists
+- Fenced code blocks with syntax highlighting
+- Mermaid flowcharts, sequence diagrams, and state diagrams
+- Quotes, tables, and page templates
 
 \`\`\`typescript
+// Example: Brief document structure
 export interface BriefDocument {
   id: string;
   spaceId: string;
@@ -147,69 +181,107 @@ export interface BriefDocument {
 }
 \`\`\`
 
-## System Flow (Mermaid)
+## Bidirectional Wiki-Links
 
-\`\`\`mermaid
-flowchart LR
-  Author[Human / Agent] -->|Markdown & Links| Editor[Brief Editor]
-  Editor -->|Sync| DB[(PostgreSQL / SQLite)]
-  Editor -->|Link| Kanso[Kanso Board BRIE]
-\`\`\`
+Type \`[[\` anywhere in a document to link to another page by title, such as [[Welcome to Brief]] or [[AI Agents, MCP & REST API]].
+
+- Brief automatically tracks **Backlinks** at the bottom of every target page so you can always see which documents reference it.
+- You can also nest pages under a parent page in the sidebar for lightweight hierarchy.
+
+## Instant Search & Command Palette
+
+- Press \`Cmd+K\` (macOS) or \`Ctrl+K\` (Windows/Linux) to jump to any page, switch spaces, or run quick actions.
+- Full-text search indexes titles, content, and space names.
 `,
   },
   {
-    id: "doc-selfhost",
-    spaceId: "space-eng",
-    parentId: "doc-arch",
-    title: "Self-Hosting & Database Guide",
-    updatedAt: "2026-11-14T14:15:00.000Z",
-    content: `# Self-Hosting & Database Guide
+    id: "doc-permissions",
+    spaceId: "space-brief",
+    parentId: "doc-welcome",
+    title: "Spaces, Permissions & SSO",
+    updatedAt: "2026-11-15T10:00:00.000Z",
+    content: `# Spaces, Permissions & SSO
 
-Brief is designed to run anywhere in 30 seconds via Docker Compose.
-See [[Brief Architecture & Editor Spec]] for the overall system flow.
+Organize your knowledge into focused **Spaces** and control who can view, edit, or publish.
 
-## Stack
+## Roles & Space Access
 
-- **Runtime:** Node.js 22 (Next.js standalone)
-- **Database:** PostgreSQL 16 (with SQLite zero-config option planned)
+Open **Team & Permissions** in the header (available to Admins) to manage users:
+
+- **Admin:** Full access to all spaces, user management, API tokens, and workspace settings.
+- **Editor:** Can create, edit, and publish pages in assigned spaces.
+- **Viewer:** Read-only access to assigned spaces (and can submit draft proposals if enabled).
+
+You can grant a user access to **All Spaces** or restrict them to specific spaces.
+
+## Drafts & Change Proposals
+
+- Pages support **Published** and **Draft / Proposal** states so edits can be reviewed before going live.
+- Admins can enable **Draft-only mode for AI agents** so agent edits always arrive as proposals.
+
+## Single Sign-On (OIDC / SSO)
+
+Configure any OpenID Connect provider (such as Keycloak, Authentik, or Okta) via \`OIDC_*\` environment variables.
+
+- Users signing in via SSO are automatically matched or created in Brief by email.
+- New SSO users start as **Viewer** and can be granted roles and space permissions in **Team & Permissions** just like regular accounts.
+`,
+  },
+  {
+    id: "doc-agents",
+    spaceId: "space-brief",
+    parentId: "doc-welcome",
+    title: "AI Agents, MCP & REST API",
+    updatedAt: "2026-11-15T10:00:00.000Z",
+    content: `# AI Agents, MCP & REST API
+
+Brief is built from the ground up to serve as shared memory for both your team and your AI agents.
+
+## 1-Click Agent Context Export
+
+Click **Copy as Agent Context** on any page to copy clean Markdown bundled with its nested child pages and \`[[Wiki-Linked]]\` references — ready to paste into an LLM prompt.
+
+## API Tokens & MCP Server
+
+Open **Agent MCP & API** in the header to generate scoped API tokens (or set \`BRIEF_API_TOKEN\` in your environment).
+
+- **MCP Endpoint:** \`POST /api/mcp\` (Model Context Protocol for listing spaces, searching, reading, and creating/updating docs)
+- **REST API:**
+  - \`GET /api/v1/spaces\` — List accessible spaces
+  - \`GET /api/v1/documents\` — List or filter documents
+  - \`GET /api/v1/search?q=...\` — Full-text search
+  - \`POST /api/v1/documents\` / \`PATCH /api/v1/documents/:id\` — Create or update pages
+
+See [[Spaces, Permissions & SSO]] for details on restricting agent edits to draft proposals.
+`,
+  },
+  {
+    id: "doc-selfhosting",
+    spaceId: "space-brief",
+    parentId: "doc-welcome",
+    title: "Self-Hosting & Configuration",
+    updatedAt: "2026-11-15T10:00:00.000Z",
+    content: `# Self-Hosting & Configuration
+
+Brief runs anywhere via Docker Compose with PostgreSQL 16 (or single-container SQLite).
+
+## Quick Start with Docker Compose
 
 \`\`\`bash
-cp .env.example .env
-docker compose up -d
+./scripts/init.sh --up
 \`\`\`
-`,
-  },
-  {
-    id: "doc-roadmap",
-    spaceId: "space-prod",
-    parentId: null,
-    title: "Q4 Product Roadmap",
-    updatedAt: "2026-11-14T14:10:00.000Z",
-    content: `# Q4 Product Roadmap
 
-Key priorities tracked in Kanso (\`BRIE\`):
+\`scripts/init.sh\` creates \`.env\` from \`.env.example\` and automatically generates secure random values for \`AUTH_SECRET\`, \`POSTGRES_PASSWORD\`, and \`DATABASE_URL\`.
 
-- [x] **BRIE-1:** Distraction-free Markdown Editor, \`/commands\`, \`Cmd+K\`, Mermaid
-- [x] **BRIE-2:** Flat Spaces & Bidirectional \`[[Wiki-Links]]\`
-- [ ] **BRIE-3:** Instant Full-Text Search (< 50ms)
-- [ ] **BRIE-8:** Copy as Agent Context (1-Click Markdown Export)
+## Key Environment Variables
 
-Related specs: [[Brief Architecture & Editor Spec]] and [[Self-Hosting & Database Guide]].
-`,
-  },
-  {
-    id: "doc-onboarding",
-    spaceId: "space-comp",
-    parentId: null,
-    title: "Team Onboarding",
-    updatedAt: "2026-11-14T14:05:00.000Z",
-    content: `# Team Onboarding
+- \`APP_URL\` — Public URL of your Brief instance (used for auth redirects and links)
+- \`PORT\` — Host port mapped to container port \`3000\` (default: \`3000\`)
+- \`POSTGRES_PORT\` — Host port mapped to PostgreSQL \`5432\` (default: \`5432\`)
+- \`BRIEF_VERSION\` — Docker image tag (e.g. \`latest\`, \`develop\`, or a release tag)
+- \`OIDC_PROVIDER_NAME\`, \`OIDC_ISSUER_URL\`, \`OIDC_CLIENT_ID\`, \`OIDC_CLIENT_SECRET\` — Optional SSO configuration
 
-Welcome! Here is how we organize knowledge in Brief:
-
-1. Keep hierarchy flat using **Spaces** (\`Engineering\`, \`Product\`, \`Company\`).
-2. Connect related pages with \`[[Document Title]]\` instead of deep folders.
-3. Review [[Q4 Product Roadmap]] and [[Brief Architecture & Editor Spec]] to get up to speed.
+For a complete overview of features, return to [[Welcome to Brief]].
 `,
   },
 ];

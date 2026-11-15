@@ -117,7 +117,7 @@ const MCP_TOOLS = [
         },
         spaceId: {
           type: "string",
-          description: "Target space ID (e.g. space-eng)",
+          description: "Target space ID (e.g. space-brief)",
         },
         targetDocId: {
           type: "string",
