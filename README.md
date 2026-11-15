@@ -29,28 +29,22 @@
 
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose v2+
 
-### 1. Download configuration
+### 1. Download configuration & initialize secrets
 
 ```bash
-curl -O https://raw.githubusercontent.com/mxw02/brief/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/mxw02/brief/main/.env.example
-cp .env.example .env
+git clone https://github.com/mxw02/brief.git && cd brief
+./scripts/init.sh
 ```
 
-### 2. Configure environment variables
+The init script automatically creates `.env` from `.env.example` and generates secure random values for `AUTH_SECRET`, `POSTGRES_PASSWORD`, and `DATABASE_URL` (no manual `openssl` command required). Adjust `APP_URL`, `KANSO_API_URL`, or `OIDC_*` in `.env` if needed.
 
-Edit `.env` and set strong secrets (especially `POSTGRES_PASSWORD` and `AUTH_SECRET`):
-
-```bash
-# Example: generate a secure random secret
-openssl rand -base64 32
-```
-
-### 3. Start Brief
+### 2. Start Brief
 
 ```bash
 docker compose up -d
 ```
+
+Or combine both steps in one command: `./scripts/init.sh --up`.
 
 Brief will be available at `http://localhost:3000` (or the `APP_URL` configured in `.env`).
 
