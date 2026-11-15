@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0](https://github.com/mxw02/brief/compare/v1.0.0...v1.1.0) (2026-11-15)
+
+
+### Features
+
+* add API & MCP Tokens tab to Team & Rechte modal ([d34cee9](https://github.com/mxw02/brief/commit/d34cee9c553fc346c58cd72966851c04feefbbe4))
+* add automated init script for .env and secrets ([2d4c8dd](https://github.com/mxw02/brief/commit/2d4c8ddf949816d4a93002ecacb6edcd8611b825))
+* add Brief SVG favicon icon ([2ba29ee](https://github.com/mxw02/brief/commit/2ba29eedbc6ffe3fc69e53fbbe72efeab630bbc5))
+* onboarding space, init script, MCP token UI, Docker arm64 fix & favicon ([65b27f5](https://github.com/mxw02/brief/commit/65b27f56c23868a4809b1439b18b0124d08fd550))
+* replace sample spaces with single Brief onboarding space ([f16252b](https://github.com/mxw02/brief/commit/f16252bc684a6ed56eef778c1368fa8e87e34f38))
+
+
+### Bug Fixes
+
+* **docker:** build Next.js standalone on BUILDPLATFORM to avoid QEMU SIGILL on arm64 ([1d49e1a](https://github.com/mxw02/brief/commit/1d49e1a396c4af5bc5a45b960a9042fb48c574cc))
+
+
+### Documentation
+
+* document MCP server endpoint, auth, and tools in README ([51d2639](https://github.com/mxw02/brief/commit/51d263901f952df71ec1d92fc311ad28fd954511))
+
 ## 1.0.0 (2026-11-14)
 
 
