@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Bot, Plus, Shield, Trash2, Users, X } from "lucide-react";
+import { Bot, KeyRound, Plus, Shield, Trash2, Users, X } from "lucide-react";
 import type { PublicUser, Space, UserRole } from "@/lib/workspace";
+import { AgentMcpPanel } from "./AgentMcpPanel";
 
 interface TeamAccessModalProps {
   open: boolean;
@@ -25,6 +26,7 @@ export function TeamAccessModal({
   onClose,
   onUserUpdated,
 }: TeamAccessModalProps) {
+  const [activeTab, setActiveTab] = useState<"team" | "tokens">("team");
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [agentBotDraftOnly, setAgentBotDraftOnly] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -208,8 +210,39 @@ export function TeamAccessModal({
           </button>
         </div>
 
+        <div className="flex items-center gap-1 border-b border-zinc-200 bg-zinc-50/60 px-5 pt-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("team")}
+            className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+              activeTab === "team"
+                ? "border-teal-700 text-teal-800"
+                : "border-transparent text-zinc-500 hover:text-zinc-800"
+            }`}
+          >
+            <Users className="h-3.5 w-3.5" />
+            Team &amp; Rechte
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tokens")}
+            className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+              activeTab === "tokens"
+                ? "border-teal-700 text-teal-800"
+                : "border-transparent text-zinc-500 hover:text-zinc-800"
+            }`}
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+            API &amp; MCP Tokens
+          </button>
+        </div>
+
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-          {error && (
+          {activeTab === "tokens" ? (
+            <AgentMcpPanel active={open && activeTab === "tokens"} />
+          ) : (
+            <>
+              {error && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
               {error}
             </div>
@@ -499,6 +532,8 @@ export function TeamAccessModal({
                 );
               })}
             </div>
+          )}
+            </>
           )}
         </div>
       </div>
