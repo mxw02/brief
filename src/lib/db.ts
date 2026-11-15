@@ -555,6 +555,32 @@ export async function dbInsertDocument(doc: BriefDocument): Promise<void> {
   );
 }
 
+/** Update a document's space and parent placement (for nested hierarchy moves). */
+export async function dbUpdateDocumentLocation(
+  id: string,
+  spaceId: string,
+  parentId: string | null,
+  updatedAt: string,
+  lastEditedBy: string
+): Promise<void> {
+  await ensureInitialized();
+  if (getDatabaseDriver() === "postgres") {
+    await getPgPool().query(
+      `UPDATE documents
+       SET space_id = $1, parent_id = $2, updated_at = $3, last_edited_by = $4, last_edited_by_type = 'agent'
+       WHERE id = $5`,
+      [spaceId, parentId, updatedAt, lastEditedBy, id]
+    );
+    return;
+  }
+  const db = await getSqlite();
+  db.prepare(
+    `UPDATE documents
+     SET space_id = ?, parent_id = ?, updated_at = ?, last_edited_by = ?, last_edited_by_type = 'agent'
+     WHERE id = ?`
+  ).run(spaceId, parentId, updatedAt, lastEditedBy, id);
+}
+
 export async function dbListTokens(): Promise<PublicApiToken[]> {
   await ensureInitialized();
   if (getDatabaseDriver() === "postgres") {

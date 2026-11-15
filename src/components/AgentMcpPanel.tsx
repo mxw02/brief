@@ -219,8 +219,9 @@ export function AgentMcpPanel({ active }: AgentMcpPanelProps) {
         <p className="text-[11px] text-zinc-500">
           MCP Tools: <code>search_docs</code>, <code>list_adrs</code>,{" "}
           <code>list_spaces</code>, <code>create_space</code>,{" "}
-          <code>get_doc</code>, <code>propose_draft</code>,{" "}
-          <code>list_drafts</code>
+          <code>list_docs</code>, <code>get_doc</code>,{" "}
+          <code>create_doc</code>, <code>move_doc</code>,{" "}
+          <code>propose_draft</code>, <code>list_drafts</code>
         </p>
       </section>
 
