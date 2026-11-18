@@ -40,8 +40,10 @@ import { AuthScreen } from "./AuthScreen";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { CommentsPanel } from "./CommentsPanel";
+import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 import { FrontmatterBar } from "./FrontmatterBar";
 import { KansoEmbedsPanel } from "./KansoEmbedsPanel";
+import { PdfAttachmentsPanel } from "./PdfAttachmentsPanel";
 import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
@@ -69,6 +71,9 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: "doc"; docId: string } | { kind: "space"; spaceId: string } | null
+  >(null);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -347,6 +352,32 @@ export function BriefEditor() {
     },
     [activeDocId, currentUser?.role]
   );
+
+  const requestDeleteDoc = useCallback(
+    (docId: string) => {
+      if (currentUser?.role === "viewer" || documents.length <= 1) return;
+      setPendingDelete({ kind: "doc", docId });
+    },
+    [currentUser?.role, documents.length]
+  );
+
+  const requestDeleteSpace = useCallback(
+    (spaceId: string) => {
+      if (currentUser?.role === "viewer" || spaces.length <= 1) return;
+      setPendingDelete({ kind: "space", spaceId });
+    },
+    [currentUser?.role, spaces.length]
+  );
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    if (pendingDelete.kind === "doc") {
+      handleDeleteDoc(pendingDelete.docId);
+    } else {
+      handleDeleteSpace(pendingDelete.spaceId);
+    }
+    setPendingDelete(null);
+  }, [pendingDelete, handleDeleteDoc, handleDeleteSpace]);
 
   const handleOpenOrCreateWikiLink = useCallback(
     (targetTitle: string) => {
@@ -843,7 +874,7 @@ export function BriefEditor() {
               <Link
                 href="/einstellung"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                title="Einstellungen, Team & API Tokens"
+                title="Einstellungen, Team, API Tokens & Backups"
               >
                 <Settings className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Einstellungen</span>
@@ -898,9 +929,9 @@ export function BriefEditor() {
             onCreateDoc={(spaceId, parentId) =>
               handleCreateDoc(spaceId, parentId ?? null)
             }
-            onDeleteDoc={handleDeleteDoc}
+            onDeleteDoc={requestDeleteDoc}
             onCreateSpace={handleCreateSpace}
-            onDeleteSpace={handleDeleteSpace}
+            onDeleteSpace={requestDeleteSpace}
             canDeleteSpace={currentUser?.role !== "viewer"}
             onCopySpaceContext={handleCopySpaceContext}
           />
@@ -936,7 +967,7 @@ export function BriefEditor() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDeleteDoc(activeDoc.id)}
+                    onClick={() => requestDeleteDoc(activeDoc.id)}
                     className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100/60"
                   >
                     Discard Draft
@@ -1065,6 +1096,18 @@ export function BriefEditor() {
 
             <KansoEmbedsPanel content={content} />
 
+            {activeDoc && (
+              <PdfAttachmentsPanel
+                docId={activeDoc.id}
+                readOnly={isViewer}
+                onInsertReference={(att) =>
+                  richEditorRef.current?.insertMarkdownSnippet(
+                    `[📄 ${att.originalName}](${att.url}) `
+                  )
+                }
+              />
+            )}
+
             <CommentsPanel
               comments={activeDoc?.comments ?? []}
               onToggleResolve={handleToggleResolveComment}
@@ -1143,6 +1186,49 @@ export function BriefEditor() {
         onClose={() => setSearchOpen(false)}
         onSelectDoc={setActiveDocId}
       />
+      {(() => {
+        if (!pendingDelete) return null;
+        if (pendingDelete.kind === "doc") {
+          const doc = documents.find((d) => d.id === pendingDelete.docId);
+          const stageLabel =
+            SPEC_STATUS_META[normalizeDocumentStatus(doc?.status)].label;
+          const childCount = documents.filter(
+            (d) => d.parentId === pendingDelete.docId
+          ).length;
+          return (
+            <ConfirmDeleteModal
+              open
+              title={`Seite "${doc?.title || "Unbenannt"}" löschen?`}
+              description={`Diese Seite (Status: ${stageLabel}) wird dauerhaft entfernt.${
+                childCount > 0
+                  ? ` ${childCount} untergeordnete Seite(n) werden eine Ebene nach oben verschoben.`
+                  : ""
+              }`}
+              confirmLabel="Seite löschen"
+              onCancel={() => setPendingDelete(null)}
+              onConfirm={handleConfirmDelete}
+            />
+          );
+        }
+        const space = spaces.find((s) => s.id === pendingDelete.spaceId);
+        const spaceDocCount = documents.filter(
+          (d) => d.spaceId === pendingDelete.spaceId
+        ).length;
+        return (
+          <ConfirmDeleteModal
+            open
+            title={`Space "${space?.name || "Unbenannt"}" löschen?`}
+            description={
+              spaceDocCount > 0
+                ? `Der Space und alle ${spaceDocCount} enthaltenen Seiten (unabhängig vom Status) werden dauerhaft gelöscht.`
+                : "Dieser leere Space wird dauerhaft entfernt."
+            }
+            confirmLabel="Space löschen"
+            onCancel={() => setPendingDelete(null)}
+            onConfirm={handleConfirmDelete}
+          />
+        );
+      })()}
     </div>
   );
 }

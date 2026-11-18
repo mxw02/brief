@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  HardDrive,
   KeyRound,
   Layers,
   LogOut,
@@ -184,6 +185,15 @@ export function EinstellungPageClient({
                     </button>
                   );
                 })}
+              {isAdmin && (
+                <Link
+                  href="/settings"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                >
+                  <HardDrive className="h-4 w-4 shrink-0" />
+                  Backups &amp; Strategie
+                </Link>
+              )}
             </aside>
 
             <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xs">

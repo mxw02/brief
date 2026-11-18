@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Check,
@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  compareDocumentsByTitle,
   normalizeDocumentStatus,
   SPEC_STATUS_META,
   SPEC_STATUSES,
@@ -169,6 +170,15 @@ function DocumentTreeNode({
   );
 }
 
+const DEFAULT_SIDEBAR_WIDTH = 256;
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 560;
+const SIDEBAR_WIDTH_STORAGE_KEY = "brief.sidebarWidth";
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width));
+}
+
 export function SpaceSidebar({
   spaces,
   documents,
@@ -186,6 +196,65 @@ export function SpaceSidebar({
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [copiedSpaceId, setCopiedSpaceId] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(DEFAULT_SIDEBAR_WIDTH);
+  const [isResizing, setIsResizing] = useState(false);
+  const dragStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+      if (saved) {
+        const parsed = Number(saved);
+        if (Number.isFinite(parsed)) {
+          setSidebarWidth(clampSidebarWidth(parsed));
+        }
+      }
+    } catch {
+      // Ignore storage unavailability
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const drag = dragStartRef.current;
+      if (!drag) return;
+      const next = clampSidebarWidth(drag.startWidth + (e.clientX - drag.startX));
+      setSidebarWidth(next);
+    };
+
+    const handlePointerUp = () => {
+      setIsResizing(false);
+      dragStartRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizing]);
+
+  useEffect(() => {
+    if (isResizing) return;
+    try {
+      window.localStorage.setItem(
+        SIDEBAR_WIDTH_STORAGE_KEY,
+        String(sidebarWidth)
+      );
+    } catch {
+      // Ignore storage unavailability
+    }
+  }, [sidebarWidth, isResizing]);
 
   const expandedIds = useMemo(() => {
     const expanded = new Set<string>();
@@ -214,7 +283,43 @@ export function SpaceSidebar({
   };
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/70">
+    <aside
+      style={{ width: `${sidebarWidth}px` }}
+      className="relative flex shrink-0 flex-col border-r border-zinc-200 bg-zinc-100/70"
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Seitenleiste skalieren"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        title="Ziehen zum Anpassen der Breite (Doppelklick zum Zurücksetzen)"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          dragStartRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+          setIsResizing(true);
+        }}
+        onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight") {
+            e.preventDefault();
+            setSidebarWidth((w) => clampSidebarWidth(w + 16));
+          } else if (e.key === "ArrowLeft") {
+            e.preventDefault();
+            setSidebarWidth((w) => clampSidebarWidth(w - 16));
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+          }
+        }}
+        className={`absolute top-0 right-0 z-10 h-full w-1.5 translate-x-1/2 cursor-col-resize transition-colors focus:outline-none ${
+          isResizing
+            ? "bg-teal-600/60"
+            : "hover:bg-teal-500/40 focus-visible:bg-teal-500/50"
+        }`}
+      />
       <div className="flex items-center justify-between border-b border-zinc-200/80 px-3.5 py-2.5">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           Spaces
@@ -321,6 +426,10 @@ export function SpaceSidebar({
             childrenByParent.set(parentKey, list);
           }
 
+          for (const list of childrenByParent.values()) {
+            list.sort(compareDocumentsByTitle);
+          }
+
           const rootDocs = childrenByParent.get(null) ?? [];
 
           return (
@@ -361,17 +470,7 @@ export function SpaceSidebar({
                   {canDeleteSpace && spaces.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (
-                          spaceDocs.length > 0 &&
-                          !window.confirm(
-                            `Space "${space.name}" mit ${spaceDocs.length} Seite(n) wirklich löschen?`
-                          )
-                        ) {
-                          return;
-                        }
-                        onDeleteSpace(space.id);
-                      }}
+                      onClick={() => onDeleteSpace(space.id)}
                       className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600"
                       title={`Delete ${space.name} space`}
                     >

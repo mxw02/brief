@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
 import {
+  compareDocumentsByTitle,
   DEFAULT_DOCUMENTS,
   DEFAULT_SPACES,
   normalizeDocumentStatus,
@@ -51,7 +52,7 @@ export function getDatabaseDriver(): DatabaseDriver {
   return "sqlite";
 }
 
-function getDataDir(): string {
+export function getDataDir(): string {
   return (
     process.env.BRIEF_DATA_DIR?.trim() || path.join(process.cwd(), ".brief-data")
   );
@@ -374,7 +375,9 @@ export async function dbReadWorkspace(): Promise<{
   if (driver === "postgres") {
     const pool = getPgPool();
     const [spacesRes, docsRes] = await Promise.all([
-      pool.query<Record<string, unknown>>("SELECT id, name, slug FROM spaces"),
+      pool.query<Record<string, unknown>>(
+        "SELECT id, name, slug FROM spaces ORDER BY name ASC, id ASC"
+      ),
       pool.query<Record<string, unknown>>(
         "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
       ),
@@ -385,13 +388,13 @@ export async function dbReadWorkspace(): Promise<{
         name: String(r.name),
         slug: String(r.slug),
       })),
-      documents: docsRes.rows.map(mapDocRow),
+      documents: docsRes.rows.map(mapDocRow).sort(compareDocumentsByTitle),
     };
   }
 
   const db = await getSqlite();
   const spaces = db
-    .prepare("SELECT id, name, slug FROM spaces")
+    .prepare("SELECT id, name, slug FROM spaces ORDER BY name ASC, id ASC")
     .all()
     .map((r) => ({
       id: String(r.id),
@@ -403,7 +406,8 @@ export async function dbReadWorkspace(): Promise<{
       "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
     )
     .all()
-    .map(mapDocRow);
+    .map(mapDocRow)
+    .sort(compareDocumentsByTitle);
 
   return { spaces, documents };
 }
@@ -1037,38 +1041,114 @@ export async function dbDeleteUser(id: string): Promise<boolean> {
   }
 }
 
-export async function dbGetAgentBotDraftOnly(): Promise<boolean> {
+async function dbGetSetting(key: string): Promise<string | undefined> {
   await ensureInitialized();
   if (getDatabaseDriver() === "postgres") {
     const res = await getPgPool().query<{ value: string }>(
-      "SELECT value FROM workspace_settings WHERE key = 'agent_bot_draft_only'"
+      "SELECT value FROM workspace_settings WHERE key = $1",
+      [key]
     );
-    const val = res.rows[0]?.value;
-    return val === undefined ? true : val !== "false";
+    return res.rows[0]?.value;
   }
   const db = await getSqlite();
   const row = db
-    .prepare(
-      "SELECT value FROM workspace_settings WHERE key = 'agent_bot_draft_only'"
-    )
-    .get();
-  return row?.value === undefined ? true : String(row.value) !== "false";
+    .prepare("SELECT value FROM workspace_settings WHERE key = ?")
+    .get(key);
+  return row?.value === undefined ? undefined : String(row.value);
 }
 
-export async function dbSetAgentBotDraftOnly(draftOnly: boolean): Promise<void> {
+async function dbSetSetting(key: string, value: string): Promise<void> {
   await ensureInitialized();
-  const value = draftOnly ? "true" : "false";
   if (getDatabaseDriver() === "postgres") {
     await getPgPool().query(
-      `INSERT INTO workspace_settings (key, value) VALUES ('agent_bot_draft_only', $1)
+      `INSERT INTO workspace_settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [value]
+      [key, value]
     );
     return;
   }
   const db = await getSqlite();
   db.prepare(
-    `INSERT INTO workspace_settings (key, value) VALUES ('agent_bot_draft_only', ?)
+    `INSERT INTO workspace_settings (key, value) VALUES (?, ?)
      ON CONFLICT (key) DO UPDATE SET value = excluded.value`
-  ).run(value);
+  ).run(key, value);
+}
+
+export async function dbGetAgentBotDraftOnly(): Promise<boolean> {
+  const val = await dbGetSetting("agent_bot_draft_only");
+  return val === undefined ? true : val !== "false";
+}
+
+export async function dbSetAgentBotDraftOnly(draftOnly: boolean): Promise<void> {
+  await dbSetSetting("agent_bot_draft_only", draftOnly ? "true" : "false");
+}
+
+export interface BackupPolicy {
+  enabled: boolean;
+  schedule: "daily" | "weekly" | "manual";
+  retentionCount: number;
+  destinationNote: string;
+}
+
+const DEFAULT_BACKUP_POLICY: BackupPolicy = {
+  enabled: true,
+  schedule: "daily",
+  retentionCount: 14,
+  destinationNote: "Lokal (brief_data/backups) + Offsite-Sync via scripts/backup.sh",
+};
+
+export async function dbGetBackupPolicy(): Promise<BackupPolicy> {
+  const raw = await dbGetSetting("backup_policy");
+  if (!raw) return DEFAULT_BACKUP_POLICY;
+  try {
+    const parsed = JSON.parse(raw) as Partial<BackupPolicy>;
+    return {
+      enabled:
+        typeof parsed.enabled === "boolean"
+          ? parsed.enabled
+          : DEFAULT_BACKUP_POLICY.enabled,
+      schedule:
+        parsed.schedule === "daily" ||
+        parsed.schedule === "weekly" ||
+        parsed.schedule === "manual"
+          ? parsed.schedule
+          : DEFAULT_BACKUP_POLICY.schedule,
+      retentionCount:
+        typeof parsed.retentionCount === "number" && parsed.retentionCount >= 1
+          ? Math.min(365, Math.floor(parsed.retentionCount))
+          : DEFAULT_BACKUP_POLICY.retentionCount,
+      destinationNote:
+        typeof parsed.destinationNote === "string"
+          ? parsed.destinationNote
+          : DEFAULT_BACKUP_POLICY.destinationNote,
+    };
+  } catch {
+    return DEFAULT_BACKUP_POLICY;
+  }
+}
+
+export async function dbSetBackupPolicy(
+  policy: Partial<BackupPolicy>
+): Promise<BackupPolicy> {
+  const current = await dbGetBackupPolicy();
+  const next: BackupPolicy = {
+    enabled:
+      typeof policy.enabled === "boolean" ? policy.enabled : current.enabled,
+    schedule:
+      policy.schedule === "daily" ||
+      policy.schedule === "weekly" ||
+      policy.schedule === "manual"
+        ? policy.schedule
+        : current.schedule,
+    retentionCount:
+      typeof policy.retentionCount === "number" && policy.retentionCount >= 1
+        ? Math.min(365, Math.floor(policy.retentionCount))
+        : current.retentionCount,
+    destinationNote:
+      typeof policy.destinationNote === "string"
+        ? policy.destinationNote.trim()
+        : current.destinationNote,
+  };
+  await dbSetSetting("backup_policy", JSON.stringify(next));
+  return next;
 }
