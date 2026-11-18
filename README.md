@@ -56,6 +56,15 @@ Pre-built multi-architecture images (`linux/amd64`, `linux/arm64`) are published
 - `ghcr.io/mxw02/brief:vX.Y.Z` — pinned semantic version release
 - `ghcr.io/mxw02/brief:develop` — latest development build from `develop`
 
+### Backup & Restore
+
+See the full [Backup Strategy](docs/BACKUP_STRATEGY.md) for schedule, 3-2-1 storage targets, retention, and RPO/RTO guidelines:
+
+```bash
+./scripts/backup.sh           # Dumps PostgreSQL, volumes (data/uploads), .env + SHA256SUMS
+./scripts/restore.sh <dir>    # Verifies checksums and restores database & volumes
+```
+
 ---
 
 ## MCP Server (Model Context Protocol)

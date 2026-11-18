@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bot,
   Check,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Settings,
   User,
   Users,
 } from "lucide-react";
@@ -870,15 +872,25 @@ export function BriefEditor() {
               </button>
 
               {currentUser?.role === "admin" && (
-                <button
-                  type="button"
-                  onClick={() => setTeamModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                  title="Team, Rollen & Space-Zugriff"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  <span className="hidden xl:inline">Team &amp; Rechte</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setTeamModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                    title="Team, Rollen & Space-Zugriff"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    <span className="hidden xl:inline">Team &amp; Rechte</span>
+                  </button>
+                  <Link
+                    href="/settings"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                    title="Einstellungen & Backups"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    <span className="hidden xl:inline">Settings</span>
+                  </Link>
+                </>
               )}
 
               {currentUser && (
