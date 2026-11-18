@@ -7,6 +7,8 @@
     "build": "next build",
     "start": "next start",
     "init": "sh scripts/init.sh",
+    "backup": "sh scripts/backup.sh",
+    "restore": "sh scripts/restore.sh",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
