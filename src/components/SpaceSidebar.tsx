@@ -472,17 +472,7 @@ export function SpaceSidebar({
                   {canDeleteSpace && spaces.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (
-                          spaceDocs.length > 0 &&
-                          !window.confirm(
-                            `Space "${space.name}" mit ${spaceDocs.length} Seite(n) wirklich löschen?`
-                          )
-                        ) {
-                          return;
-                        }
-                        onDeleteSpace(space.id);
-                      }}
+                      onClick={() => onDeleteSpace(space.id)}
                       className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600"
                       title={`Delete ${space.name} space`}
                     >
