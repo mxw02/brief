@@ -335,6 +335,25 @@ export function BriefEditor() {
     setSpaces((prev) => [...prev, newSpace]);
   }, []);
 
+  const handleDeleteSpace = useCallback(
+    (spaceId: string) => {
+      if (currentUser?.role === "viewer") return;
+      setSpaces((prev) => {
+        if (prev.length <= 1) return prev;
+        return prev.filter((s) => s.id !== spaceId);
+      });
+      setDocuments((prev) => {
+        const nextDocs = prev.filter((d) => d.spaceId !== spaceId);
+        const activeWasDeleted = !nextDocs.some((d) => d.id === activeDocId);
+        if (activeWasDeleted) {
+          setActiveDocId(nextDocs[0]?.id ?? "");
+        }
+        return nextDocs;
+      });
+    },
+    [activeDocId, currentUser?.role]
+  );
+
   const handleOpenOrCreateWikiLink = useCallback(
     (targetTitle: string) => {
       const normalized = targetTitle.trim().toLowerCase();
@@ -913,6 +932,8 @@ export function BriefEditor() {
             }
             onDeleteDoc={handleDeleteDoc}
             onCreateSpace={handleCreateSpace}
+            onDeleteSpace={handleDeleteSpace}
+            canDeleteSpace={currentUser?.role !== "viewer"}
             onCopySpaceContext={handleCopySpaceContext}
             onOpenAgentMcp={() => setMcpModalOpen(true)}
           />
