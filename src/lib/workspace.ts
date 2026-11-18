@@ -305,6 +305,17 @@ export function extractWikiLinks(markdown: string): string[] {
   return Array.from(links);
 }
 
+export function compareDocumentsByTitle(
+  a: { title: string; id: string },
+  b: { title: string; id: string }
+): number {
+  const byTitle = a.title.localeCompare(b.title, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  return byTitle !== 0 ? byTitle : a.id.localeCompare(b.id);
+}
+
 export function findBacklinks(
   targetDoc: BriefDocument,
   allDocs: BriefDocument[],

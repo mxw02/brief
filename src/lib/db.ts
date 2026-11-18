@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Pool } from "pg";
 import {
+  compareDocumentsByTitle,
   DEFAULT_DOCUMENTS,
   DEFAULT_SPACES,
   normalizeDocumentStatus,
@@ -374,7 +375,9 @@ export async function dbReadWorkspace(): Promise<{
   if (driver === "postgres") {
     const pool = getPgPool();
     const [spacesRes, docsRes] = await Promise.all([
-      pool.query<Record<string, unknown>>("SELECT id, name, slug FROM spaces"),
+      pool.query<Record<string, unknown>>(
+        "SELECT id, name, slug FROM spaces ORDER BY name ASC, id ASC"
+      ),
       pool.query<Record<string, unknown>>(
         "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
       ),
@@ -385,13 +388,13 @@ export async function dbReadWorkspace(): Promise<{
         name: String(r.name),
         slug: String(r.slug),
       })),
-      documents: docsRes.rows.map(mapDocRow),
+      documents: docsRes.rows.map(mapDocRow).sort(compareDocumentsByTitle),
     };
   }
 
   const db = await getSqlite();
   const spaces = db
-    .prepare("SELECT id, name, slug FROM spaces")
+    .prepare("SELECT id, name, slug FROM spaces ORDER BY name ASC, id ASC")
     .all()
     .map((r) => ({
       id: String(r.id),
@@ -403,7 +406,8 @@ export async function dbReadWorkspace(): Promise<{
       "SELECT id, space_id, parent_id, title, content, updated_at, status, proposed_by, proposal_target_id, proposal_summary, last_edited_by, last_edited_by_type, comments_json FROM documents"
     )
     .all()
-    .map(mapDocRow);
+    .map(mapDocRow)
+    .sort(compareDocumentsByTitle);
 
   return { spaces, documents };
 }

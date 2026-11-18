@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  compareDocumentsByTitle,
   normalizeDocumentStatus,
   SPEC_STATUS_META,
   SPEC_STATUSES,
@@ -321,6 +322,10 @@ export function SpaceSidebar({
             const list = childrenByParent.get(parentKey) ?? [];
             list.push(doc);
             childrenByParent.set(parentKey, list);
+          }
+
+          for (const list of childrenByParent.values()) {
+            list.sort(compareDocumentsByTitle);
           }
 
           const rootDocs = childrenByParent.get(null) ?? [];
