@@ -1,21 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bot,
   Check,
-  Command,
-  FilePlus2,
   Lock,
   LogOut,
   MessageSquare,
   Minimize2,
   PanelLeft,
   RefreshCw,
-  RotateCcw,
   Search,
+  Settings,
   User,
-  Users,
 } from "lucide-react";
 import {
   buildAgentContextMarkdown,
@@ -38,7 +36,6 @@ import {
   type PublicUser,
   type Space,
 } from "@/lib/workspace";
-import { AgentMcpModal } from "./AgentMcpModal";
 import { AuthScreen } from "./AuthScreen";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
@@ -51,7 +48,6 @@ import {
 } from "./RichDocumentEditor";
 import { SearchModal } from "./SearchModal";
 import { SpaceSidebar } from "./SpaceSidebar";
-import { TeamAccessModal } from "./TeamAccessModal";
 
 const STORAGE_WORKSPACE_KEY = "brief:workspace:v2";
 
@@ -73,8 +69,6 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -528,9 +522,11 @@ export function BriefEditor() {
       {
         id: "agent-mcp-settings",
         group: "Document",
-        label: "Agent API & MCP Settings",
-        description: "Manage API tokens and MCP configuration for AI agents",
-        onRun: () => setMcpModalOpen(true),
+        label: "Einstellungen & API / MCP",
+        description: "Team, API Tokens, MCP und Workspace-Einstellungen öffnen",
+        onRun: () => {
+          window.location.assign("/einstellung");
+        },
       },
       {
         id: "doc-reset",
@@ -827,31 +823,6 @@ export function BriefEditor() {
 
               <button
                 type="button"
-                onClick={() => {
-                  if (activeDoc) handleCreateDoc(activeDoc.spaceId, activeDoc.id);
-                }}
-                className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 sm:inline-flex"
-                title="Create nested child page"
-              >
-                <FilePlus2 className="h-3.5 w-3.5" />
-                <span className="hidden lg:inline">Child Page</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaletteOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                title="Command Palette (Cmd+K)"
-              >
-                <Command className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Commands</span>
-                <kbd className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] text-zinc-500">
-                  ⌘K
-                </kbd>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleCopyAgentContext}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
                 title="Copy page + nested & [[linked]] docs as Agent Context"
@@ -869,17 +840,14 @@ export function BriefEditor() {
                 )}
               </button>
 
-              {currentUser?.role === "admin" && (
-                <button
-                  type="button"
-                  onClick={() => setTeamModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                  title="Team, Rollen & Space-Zugriff"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  <span className="hidden xl:inline">Team &amp; Rechte</span>
-                </button>
-              )}
+              <Link
+                href="/einstellung"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                title="Einstellungen, Team & API Tokens"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Einstellungen</span>
+              </Link>
 
               {currentUser && (
                 <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700">
@@ -935,7 +903,6 @@ export function BriefEditor() {
             onDeleteSpace={handleDeleteSpace}
             canDeleteSpace={currentUser?.role !== "viewer"}
             onCopySpaceContext={handleCopySpaceContext}
-            onOpenAgentMcp={() => setMcpModalOpen(true)}
           />
         )}
 
@@ -1063,18 +1030,6 @@ export function BriefEditor() {
                     {activeDoc?.lastEditedBy || activeDoc?.proposedBy}
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSpaces(DEFAULT_SPACES);
-                    setDocuments(DEFAULT_DOCUMENTS);
-                    setActiveDocId(DEFAULT_DOCUMENTS[0].id);
-                  }}
-                  className="shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-                  title="Reset demo workspace"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
               </div>
             </div>
 
@@ -1188,21 +1143,6 @@ export function BriefEditor() {
         onClose={() => setSearchOpen(false)}
         onSelectDoc={setActiveDocId}
       />
-
-      <AgentMcpModal
-        open={mcpModalOpen}
-        onClose={() => setMcpModalOpen(false)}
-      />
-
-      {currentUser && (
-        <TeamAccessModal
-          open={teamModalOpen}
-          currentUser={currentUser}
-          spaces={spaces}
-          onClose={() => setTeamModalOpen(false)}
-          onUserUpdated={(updated) => setCurrentUser(updated)}
-        />
-      )}
     </div>
   );
 }

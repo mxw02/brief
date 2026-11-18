@@ -32,7 +32,6 @@ interface SpaceSidebarProps {
   onDeleteSpace: (spaceId: string) => void;
   canDeleteSpace?: boolean;
   onCopySpaceContext: (spaceId: string) => void;
-  onOpenAgentMcp: () => void;
 }
 
 interface TreeNodeProps {
@@ -181,7 +180,6 @@ export function SpaceSidebar({
   onDeleteSpace,
   canDeleteSpace = true,
   onCopySpaceContext,
-  onOpenAgentMcp,
 }: SpaceSidebarProps) {
   const [addingSpace, setAddingSpace] = useState(false);
   const [newSpaceName, setNewSpaceName] = useState("");
@@ -414,22 +412,6 @@ export function SpaceSidebar({
           );
         })}
       </nav>
-
-      <div className="border-t border-zinc-200 p-3">
-        <button
-          type="button"
-          onClick={onOpenAgentMcp}
-          className="flex w-full items-center justify-between rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
-        >
-          <span className="flex items-center gap-1.5">
-            <Bot className="h-3.5 w-3.5 text-emerald-700" />
-            Agent MCP &amp; API
-          </span>
-          <span className="rounded bg-white px-1.5 py-0.5 text-[10px] text-zinc-500">
-            Tokens
-          </span>
-        </button>
-      </div>
     </aside>
   );
 }
