@@ -45,6 +45,7 @@ import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { CommentsPanel } from "./CommentsPanel";
 import { FrontmatterBar } from "./FrontmatterBar";
 import { KansoEmbedsPanel } from "./KansoEmbedsPanel";
+import { PdfAttachmentsPanel } from "./PdfAttachmentsPanel";
 import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
@@ -1109,6 +1110,18 @@ export function BriefEditor() {
             />
 
             <KansoEmbedsPanel content={content} />
+
+            {activeDoc && (
+              <PdfAttachmentsPanel
+                docId={activeDoc.id}
+                readOnly={isViewer}
+                onInsertReference={(att) =>
+                  richEditorRef.current?.insertMarkdownSnippet(
+                    `[📄 ${att.originalName}](${att.url}) `
+                  )
+                }
+              />
+            )}
 
             <CommentsPanel
               comments={activeDoc?.comments ?? []}
