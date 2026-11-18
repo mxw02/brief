@@ -85,8 +85,10 @@ Brief exposes a built-in HTTP MCP server (`JSON-RPC 2.0`) so AI coding agents ca
 - `search_docs` — Full-text search across docs, specs, and ADRs
 - `list_adrs` — List Architecture Decision Records and technical specs
 - `list_spaces` / `create_space` — List or create Spaces
+- `list_docs` — List the nested document tree inside Spaces
 - `get_doc` — Read a document by ID or exact title (optionally with nested/linked Agent Context)
-- `propose_draft` / `list_drafts` — Propose or list agent draft updates for human review
+- `create_doc` / `move_doc` — Create nested documents (`parentId`) or reorganize hierarchy (respects Draft-only policy)
+- `propose_draft` / `list_drafts` — Propose (including nested `parentId`) or list agent draft updates for human review
 
 ---
 

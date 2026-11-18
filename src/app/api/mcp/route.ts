@@ -7,8 +7,11 @@ import {
 } from "@/lib/frontmatter";
 import { buildSearchIndex, searchDocuments } from "@/lib/search-index";
 import {
+  buildSpaceDocumentTree,
+  createAgentDocument,
   createSpaceInStore,
   isAdrOrSpecDocument,
+  moveDocumentInStore,
   proposeAgentDraft,
   readWorkspaceStore,
 } from "@/lib/server-store";
@@ -81,6 +84,24 @@ const MCP_TOOLS = [
     },
   },
   {
+    name: "list_docs",
+    description:
+      "List the nested document tree inside Spaces (showing parent/child hierarchy, IDs, titles, and statuses).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        space: {
+          type: "string",
+          description: "Optional space ID, slug, or name filter",
+        },
+        includeDrafts: {
+          type: "boolean",
+          description: "Whether to include draft documents (default: false)",
+        },
+      },
+    },
+  },
+  {
     name: "get_doc",
     description:
       "Read a Brief document by ID or exact title, optionally including nested and linked same-space context.",
@@ -103,7 +124,7 @@ const MCP_TOOLS = [
   {
     name: "propose_draft",
     description:
-      "Propose a new Changelog or Documentation update as a Draft for human review. Never overwrites published documents.",
+      "Propose a new Changelog or Documentation update as a Draft for human review (supports nested parentId). Never overwrites published documents.",
     inputSchema: {
       type: "object",
       properties: {
@@ -117,12 +138,17 @@ const MCP_TOOLS = [
         },
         spaceId: {
           type: "string",
-          description: "Target space ID (e.g. space-brief)",
+          description: "Target space ID, slug, or name (e.g. space-brief)",
+        },
+        parentId: {
+          type: ["string", "null"],
+          description:
+            "Optional parent document ID or exact title to nest this page under (or null for root level)",
         },
         targetDocId: {
           type: "string",
           description:
-            "Optional ID of an existing document this draft proposes to update",
+            "Optional ID or exact title of an existing document this draft proposes to update",
         },
         summary: {
           type: "string",
@@ -130,6 +156,58 @@ const MCP_TOOLS = [
         },
       },
       required: ["title", "content"],
+    },
+  },
+  {
+    name: "create_doc",
+    description:
+      "Create a new document (optionally nested under parentId). Publishes directly when Agent-Bot Draft-only policy is disabled; otherwise creates a Draft.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Document title",
+        },
+        content: {
+          type: "string",
+          description: "Full Markdown content",
+        },
+        spaceId: {
+          type: "string",
+          description: "Target space ID, slug, or name (e.g. space-brief)",
+        },
+        parentId: {
+          type: ["string", "null"],
+          description:
+            "Optional parent document ID or exact title to nest this page under (or null for root level)",
+        },
+      },
+      required: ["title", "content"],
+    },
+  },
+  {
+    name: "move_doc",
+    description:
+      "Move or re-parent an existing document within a Space or across Spaces to organize nested hierarchy (requires Agent-Bot Draft-only policy to be disabled).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        idOrTitle: {
+          type: "string",
+          description: "Document ID or exact title to move",
+        },
+        parentId: {
+          type: ["string", "null"],
+          description:
+            "New parent document ID or exact title, or null to move to Space root level",
+        },
+        spaceId: {
+          type: "string",
+          description: "Optional target space ID, slug, or name",
+        },
+      },
+      required: ["idOrTitle"],
     },
   },
   {
@@ -377,6 +455,19 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (toolName === "list_docs") {
+      const spaceRef =
+        typeof args.space === "string" ? args.space.trim() : undefined;
+      const includeDrafts = Boolean(args.includeDrafts);
+      const tree = buildSpaceDocumentTree(spaces, documents, {
+        spaceRef,
+        includeDrafts,
+      });
+      return jsonRpcResult(id, {
+        content: [{ type: "text", text: JSON.stringify(tree, null, 2) }],
+      });
+    }
+
     if (toolName === "get_doc") {
       const idOrTitle =
         typeof args.idOrTitle === "string" ? args.idOrTitle.trim() : "";
@@ -415,28 +506,154 @@ export async function POST(request: NextRequest) {
           content: [{ type: "text", text: "content must be a non-empty Markdown string" }],
         });
       }
-      const draft = await proposeAgentDraft({
-        title,
-        content,
-        spaceId: typeof args.spaceId === "string" ? args.spaceId : undefined,
-        targetDocId:
-          typeof args.targetDocId === "string" ? args.targetDocId : undefined,
-        proposedBy: auth.agentName,
-        summary: typeof args.summary === "string" ? args.summary : undefined,
-      });
+      const parentId =
+        args.parentId === null
+          ? null
+          : typeof args.parentId === "string"
+            ? args.parentId
+            : undefined;
+      try {
+        const draft = await proposeAgentDraft({
+          title,
+          content,
+          spaceId: typeof args.spaceId === "string" ? args.spaceId : undefined,
+          parentId,
+          targetDocId:
+            typeof args.targetDocId === "string" ? args.targetDocId : undefined,
+          proposedBy: auth.agentName,
+          summary: typeof args.summary === "string" ? args.summary : undefined,
+        });
 
+        return jsonRpcResult(id, {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: "draft_created",
+                  draftId: draft.id,
+                  title: draft.title,
+                  spaceId: draft.spaceId,
+                  parentId: draft.parentId ?? null,
+                  proposalTargetId: draft.proposalTargetId ?? null,
+                  note: "Created as Draft for human review; published docs were not modified.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        });
+      } catch (err) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: err instanceof Error ? err.message : "Failed to propose draft",
+            },
+          ],
+        });
+      }
+    }
+
+    if (toolName === "create_doc") {
+      const title = typeof args.title === "string" ? args.title : "";
+      const content = typeof args.content === "string" ? args.content : "";
+      if (!title.trim() || !content.trim()) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [
+            { type: "text", text: "title and content must be non-empty strings" },
+          ],
+        });
+      }
+      const parentId =
+        args.parentId === null
+          ? null
+          : typeof args.parentId === "string"
+            ? args.parentId
+            : undefined;
+      try {
+        const { doc, draftOnly } = await createAgentDocument({
+          title,
+          content,
+          spaceId: typeof args.spaceId === "string" ? args.spaceId : undefined,
+          parentId,
+          authorName: auth.agentName,
+        });
+        return jsonRpcResult(id, {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  status: draftOnly ? "draft_created" : "published",
+                  id: doc.id,
+                  title: doc.title,
+                  spaceId: doc.spaceId,
+                  parentId: doc.parentId ?? null,
+                  note: draftOnly
+                    ? "Agent-Bot Draft-only policy is active; created as Draft for human review."
+                    : "Document created and published.",
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        });
+      } catch (err) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: err instanceof Error ? err.message : "Failed to create document",
+            },
+          ],
+        });
+      }
+    }
+
+    if (toolName === "move_doc") {
+      const idOrTitle =
+        typeof args.idOrTitle === "string" ? args.idOrTitle.trim() : "";
+      if (!idOrTitle) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [{ type: "text", text: "idOrTitle must be a non-empty string" }],
+        });
+      }
+      const parentId =
+        args.parentId === null
+          ? null
+          : typeof args.parentId === "string"
+            ? args.parentId
+            : undefined;
+      const result = await moveDocumentInStore({
+        idOrTitle,
+        parentId,
+        spaceId: typeof args.spaceId === "string" ? args.spaceId : undefined,
+        authorName: auth.agentName,
+      });
+      if ("error" in result) {
+        return jsonRpcResult(id, {
+          isError: true,
+          content: [{ type: "text", text: result.error }],
+        });
+      }
       return jsonRpcResult(id, {
         content: [
           {
             type: "text",
             text: JSON.stringify(
               {
-                status: "draft_created",
-                draftId: draft.id,
-                title: draft.title,
-                spaceId: draft.spaceId,
-                proposalTargetId: draft.proposalTargetId ?? null,
-                note: "Created as Draft for human review; published docs were not modified.",
+                status: "moved",
+                id: result.doc.id,
+                title: result.doc.title,
+                spaceId: result.doc.spaceId,
+                parentId: result.doc.parentId ?? null,
               },
               null,
               2

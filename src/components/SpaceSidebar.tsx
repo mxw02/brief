@@ -29,6 +29,8 @@ interface SpaceSidebarProps {
   onCreateDoc: (spaceId: string, parentId?: string | null) => void;
   onDeleteDoc: (docId: string) => void;
   onCreateSpace: (name: string) => void;
+  onDeleteSpace: (spaceId: string) => void;
+  canDeleteSpace?: boolean;
   onCopySpaceContext: (spaceId: string) => void;
   onOpenAgentMcp: () => void;
 }
@@ -176,6 +178,8 @@ export function SpaceSidebar({
   onCreateDoc,
   onDeleteDoc,
   onCreateSpace,
+  onDeleteSpace,
+  canDeleteSpace = true,
   onCopySpaceContext,
   onOpenAgentMcp,
 }: SpaceSidebarProps) {
@@ -356,6 +360,26 @@ export function SpaceSidebar({
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
+                  {canDeleteSpace && spaces.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          spaceDocs.length > 0 &&
+                          !window.confirm(
+                            `Space "${space.name}" mit ${spaceDocs.length} Seite(n) wirklich löschen?`
+                          )
+                        ) {
+                          return;
+                        }
+                        onDeleteSpace(space.id);
+                      }}
+                      className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                      title={`Delete ${space.name} space`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
 
