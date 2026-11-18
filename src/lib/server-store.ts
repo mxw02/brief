@@ -13,7 +13,11 @@ import {
   type ApiTokenRecord,
   type PublicApiToken,
 } from "./db";
-import type { BriefDocument, Space } from "./workspace";
+import {
+  compareDocumentsByTitle,
+  type BriefDocument,
+  type Space,
+} from "./workspace";
 
 export type { ApiTokenRecord, PublicApiToken };
 
@@ -415,6 +419,11 @@ export function buildSpaceDocumentTree(
       } else {
         roots.push(node);
       }
+    }
+
+    roots.sort(compareDocumentsByTitle);
+    for (const node of nodeMap.values()) {
+      node.children.sort(compareDocumentsByTitle);
     }
 
     return {
