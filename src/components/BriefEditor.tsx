@@ -585,43 +585,100 @@ export function BriefEditor() {
     title,
   ]);
 
+  const applyDraftApprovals = useCallback(
+    (
+      prev: BriefDocument[],
+      draftIds: Set<string>,
+      now: string
+    ): { next: BriefDocument[]; redirectActiveId?: string } => {
+      const removedDraftIds = new Set<string>();
+      const contentUpdates = new Map<string, string>();
+      let redirectActiveId: string | undefined;
+
+      for (const doc of prev) {
+        if (!draftIds.has(doc.id)) continue;
+        if (
+          doc.proposalTargetId &&
+          prev.some((target) => target.id === doc.proposalTargetId)
+        ) {
+          removedDraftIds.add(doc.id);
+          contentUpdates.set(doc.proposalTargetId, doc.content);
+          if (doc.id === activeDocId) {
+            redirectActiveId = doc.proposalTargetId;
+          }
+        }
+      }
+
+      const next = prev
+        .filter((d) => !removedDraftIds.has(d.id))
+        .map((d) => {
+          const updatedContent = contentUpdates.get(d.id);
+          if (updatedContent !== undefined) {
+            return { ...d, content: updatedContent, updatedAt: now };
+          }
+          if (draftIds.has(d.id)) {
+            return {
+              ...d,
+              status: "approved" as const,
+              proposedBy: undefined,
+              proposalTargetId: undefined,
+              proposalSummary: undefined,
+              updatedAt: now,
+            };
+          }
+          return d;
+        });
+
+      return { next, redirectActiveId };
+    },
+    [activeDocId]
+  );
+
   const handleApproveDraft = useCallback(
     (draft: BriefDocument) => {
       const now = new Date().toISOString();
-      if (
-        draft.proposalTargetId &&
-        documents.some((d) => d.id === draft.proposalTargetId)
-      ) {
-        const targetId = draft.proposalTargetId;
-        setDocuments((prev) =>
-          prev
-            .filter((d) => d.id !== draft.id)
-            .map((d) =>
-              d.id === targetId
-                ? { ...d, content: draft.content, updatedAt: now }
-                : d
-            )
+      setDocuments((prev) => {
+        const { next, redirectActiveId } = applyDraftApprovals(
+          prev,
+          new Set([draft.id]),
+          now
         );
-        setActiveDocId(targetId);
-        return;
-      }
-
-      setDocuments((prev) =>
-        prev.map((d) =>
-          d.id === draft.id
-            ? {
-                ...d,
-                status: "approved",
-                proposedBy: undefined,
-                proposalTargetId: undefined,
-                proposalSummary: undefined,
-                updatedAt: now,
-              }
-            : d
-        )
-      );
+        if (redirectActiveId) {
+          setActiveDocId(redirectActiveId);
+        }
+        return next;
+      });
     },
-    [documents]
+    [applyDraftApprovals]
+  );
+
+  const handlePublishAllDrafts = useCallback(
+    (spaceId: string) => {
+      if (currentUser?.role === "viewer") return;
+      const now = new Date().toISOString();
+      setDocuments((prev) => {
+        const draftIds = new Set(
+          prev
+            .filter(
+              (d) =>
+                d.spaceId === spaceId &&
+                normalizeDocumentStatus(d.status) === "draft"
+            )
+            .map((d) => d.id)
+        );
+        if (draftIds.size === 0) return prev;
+        const { next, redirectActiveId } = applyDraftApprovals(
+          prev,
+          draftIds,
+          now
+        );
+        if (redirectActiveId) {
+          setActiveDocId(redirectActiveId);
+        }
+        return next;
+      });
+    },
+    [applyDraftApprovals, currentUser?.role]
   );
 
   const handleAddInlineComment = useCallback(
@@ -933,6 +990,7 @@ export function BriefEditor() {
             onCreateSpace={handleCreateSpace}
             onDeleteSpace={requestDeleteSpace}
             canDeleteSpace={currentUser?.role !== "viewer"}
+            onPublishAllDrafts={handlePublishAllDrafts}
             onCopySpaceContext={handleCopySpaceContext}
           />
         )}
