@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.2.0](https://github.com/mxw02/brief/compare/v1.1.0...v1.2.0) (2026-11-20)
+
+
+### Features
+
+* /einstellung UI, backup strategy & /settings, PDF uploads, resizable sidebar, batch draft publish & bugfixes ([51cd2b2](https://github.com/mxw02/brief/commit/51cd2b2fdc6338dbd053120f566f63497a98025f))
+* **BRIE-16:** confirmation dialog before deleting spaces or pages ([b81c159](https://github.com/mxw02/brief/commit/b81c15993a5b025e9a38baa8c22b6c2f30ceb400))
+* **BRIE-16:** require confirmation dialog before deleting spaces or pages ([65f1274](https://github.com/mxw02/brief/commit/65f1274330b54228f6acce98186141540abfeabe))
+* **BRIE-18:** make left space sidebar resizable with persistence ([c241f67](https://github.com/mxw02/brief/commit/c241f67799d6cf0797961d77bb1f3dd7b57582ff))
+* **BRIE-18:** resizable left space sidebar with localStorage persistence ([5beb58c](https://github.com/mxw02/brief/commit/5beb58cc6b917ffe415fdb685cd9eb57fcacc2c8))
+* **BRIE-19:** per-page PDF upload and inline referencing ([c900910](https://github.com/mxw02/brief/commit/c9009102e807b4bb2c816bc6f0aa2602197cc252))
+* **BRIE-19:** support per-page PDF upload and inline text referencing ([ca90285](https://github.com/mxw02/brief/commit/ca902852a1da9263953a25b1be3a29328e1c28b8))
+* **BRIE-21:** add /settings page and API for backup management ([60bd0fa](https://github.com/mxw02/brief/commit/60bd0fabbda1b2639d91b48a4680c97736b35da2))
+* **BRIE-21:** backup strategy, CLI backup/restore scripts & /settings backup UI ([7db1e34](https://github.com/mxw02/brief/commit/7db1e34d8b7d82d4bf5db2842a5206badbdc9d6d))
+* **BRIE-21:** define backup strategy and add backup/restore scripts ([c84490f](https://github.com/mxw02/brief/commit/c84490f398cdf136fc06702ff3a8917cb8e563f0))
+* **BRIE-24:** add dedicated /einstellung page and streamline main header ([5d39100](https://github.com/mxw02/brief/commit/5d39100b9ff6dbfe35a47356e57675d8b21b1f11))
+* **BRIE-24:** dedicated /einstellung page & streamlined main top bar ([8210e92](https://github.com/mxw02/brief/commit/8210e9211d51a2ecfd33740c748e6794baed4264))
+* **BRIE-25:** add button to publish all drafts of a space at once ([25b1c7e](https://github.com/mxw02/brief/commit/25b1c7ef80c91f948685c7d0882cddb46fb4143f))
+* **BRIE-25:** publish all drafts in a space at once ([27a3c7b](https://github.com/mxw02/brief/commit/27a3c7b495ddeafdeeb8affb963696c49a315b69))
+* **mcp:** support nested document trees, create_doc, move_doc, and parentId ([7e1f69f](https://github.com/mxw02/brief/commit/7e1f69f4d568286a91f05384b3db2ccbce91ffea))
+* nested MCP document hierarchy & BRIE-23 delete space ([ad532f0](https://github.com/mxw02/brief/commit/ad532f0c74a7efe15345af9f9301cf83a591bde1))
+
+
+### Bug Fixes
+
+* **BRIE-17:** deterministic natural sorting for spaces and documents ([3bb3ad5](https://github.com/mxw02/brief/commit/3bb3ad5faf8211ffd4ffcea257ca73f434272208))
+* **BRIE-17:** sort spaces and documents deterministically across DB, sidebar, and MCP ([398827c](https://github.com/mxw02/brief/commit/398827c78896f80b0092f7741d89912d186942ed))
+* **BRIE-23:** allow deleting spaces in sidebar with confirmation ([664940f](https://github.com/mxw02/brief/commit/664940f3f464c5fc153342e619e5afd5b1c8fcec))
+* **BRIE-26:** hide Mermaid source code in diagram preview mode ([5b6eb95](https://github.com/mxw02/brief/commit/5b6eb95c7b4565b08fde045ddf4bc621742a3db7))
+* **BRIE-26:** hide Mermaid source code in preview mode by keeping NodeViewContent mounted ([6fe1fff](https://github.com/mxw02/brief/commit/6fe1fffd4f5022082219ac4615c4c6b3e8623dae))
+
 ## [1.1.0](https://github.com/mxw02/brief/compare/v1.0.0...v1.1.0) (2026-11-15)
 
 
