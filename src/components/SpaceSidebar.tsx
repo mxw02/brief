@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Check,
+  CheckCheck,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -32,6 +33,7 @@ interface SpaceSidebarProps {
   onCreateSpace: (name: string) => void;
   onDeleteSpace: (spaceId: string) => void;
   canDeleteSpace?: boolean;
+  onPublishAllDrafts?: (spaceId: string) => void;
   onCopySpaceContext: (spaceId: string) => void;
 }
 
@@ -189,6 +191,7 @@ export function SpaceSidebar({
   onCreateSpace,
   onDeleteSpace,
   canDeleteSpace = true,
+  onPublishAllDrafts,
   onCopySpaceContext,
 }: SpaceSidebarProps) {
   const [addingSpace, setAddingSpace] = useState(false);
@@ -431,6 +434,11 @@ export function SpaceSidebar({
           }
 
           const rootDocs = childrenByParent.get(null) ?? [];
+          const draftCount = documents.filter(
+            (d) =>
+              d.spaceId === space.id &&
+              normalizeDocumentStatus(d.status) === "draft"
+          ).length;
 
           return (
             <div key={space.id}>
@@ -479,6 +487,18 @@ export function SpaceSidebar({
                   )}
                 </div>
               </div>
+
+              {canDeleteSpace && onPublishAllDrafts && draftCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onPublishAllDrafts(space.id)}
+                  className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-medium text-emerald-800 transition-colors hover:bg-emerald-100"
+                  title={`Alle ${draftCount} Drafts in "${space.name}" gleichzeitig publishen`}
+                >
+                  <CheckCheck className="h-3.5 w-3.5 text-emerald-700" />
+                  Alle Drafts publishen ({draftCount})
+                </button>
+              )}
 
               <div className="space-y-0.5">
                 {rootDocs.length === 0 ? (
