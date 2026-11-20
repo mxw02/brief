@@ -106,17 +106,23 @@ export function RichCodeBlock({
         </div>
       </div>
 
-      {isMermaid && !editingMermaid ? (
+      {isMermaid && !editingMermaid && (
         <div contentEditable={false} className="p-2">
           <MermaidDiagram chart={codeText} />
         </div>
-      ) : (
-        <pre className="overflow-x-auto bg-white p-4 font-mono text-[13px] leading-relaxed text-zinc-800">
-          <code>
-            <NodeViewContent />
-          </code>
-        </pre>
       )}
+      {/* Keep NodeViewContent mounted so TipTap does not append contentDOM directly to the wrapper */}
+      <pre
+        className={
+          isMermaid && !editingMermaid
+            ? "hidden"
+            : "overflow-x-auto bg-white p-4 font-mono text-[13px] leading-relaxed text-zinc-800"
+        }
+      >
+        <code>
+          <NodeViewContent />
+        </code>
+      </pre>
     </NodeViewWrapper>
   );
 }

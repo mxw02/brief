@@ -281,6 +281,10 @@ Brief runs anywhere via Docker Compose with PostgreSQL 16 (or single-container S
 - \`BRIEF_VERSION\` — Docker image tag (e.g. \`latest\`, \`develop\`, or a release tag)
 - \`OIDC_PROVIDER_NAME\`, \`OIDC_ISSUER_URL\`, \`OIDC_CLIENT_ID\`, \`OIDC_CLIENT_SECRET\` — Optional SSO configuration
 
+## Backups & Restore
+
+Run \`./scripts/backup.sh\` (e.g. daily via cron) to back up PostgreSQL, uploaded files, and \`.env\` with SHA-256 checksums, and \`./scripts/restore.sh <backup-dir>\` to restore. See \`docs/BACKUP_STRATEGY.md\` for the full 3-2-1 backup strategy.
+
 For a complete overview of features, return to [[Welcome to Brief]].
 `,
   },
@@ -303,6 +307,17 @@ export function extractWikiLinks(markdown: string): string[] {
     if (target) links.add(target);
   }
   return Array.from(links);
+}
+
+export function compareDocumentsByTitle(
+  a: { title: string; id: string },
+  b: { title: string; id: string }
+): number {
+  const byTitle = a.title.localeCompare(b.title, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  return byTitle !== 0 ? byTitle : a.id.localeCompare(b.id);
 }
 
 export function findBacklinks(

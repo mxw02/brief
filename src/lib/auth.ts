@@ -83,6 +83,19 @@ export async function getSessionUser(): Promise<PublicUser | null> {
   return dbFindUserById(userId);
 }
 
+export async function requireAdminSession(): Promise<
+  { ok: true; user: PublicUser } | { ok: false; status: 401 | 403; error: string }
+> {
+  const user = await getSessionUser();
+  if (!user) {
+    return { ok: false, status: 401, error: "Unauthorized" };
+  }
+  if (user.role !== "admin") {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+  return { ok: true, user };
+}
+
 export function canAccessSpace(user: PublicUser, spaceId: string): boolean {
   if (user.role === "admin" || user.allSpaces) return true;
   return user.spaceIds.includes(spaceId);

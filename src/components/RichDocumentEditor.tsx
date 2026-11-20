@@ -350,6 +350,11 @@ export const RichDocumentEditor = forwardRef<
           onOpenOrCreateWikiLink(title);
           return true;
         }
+        if (href.startsWith("/api/uploads/")) {
+          event.preventDefault();
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        }
         return false;
       },
       handleKeyDown: (_view, event) => {

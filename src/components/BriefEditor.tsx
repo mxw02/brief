@@ -1,21 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bot,
   Check,
-  Command,
-  FilePlus2,
   Lock,
   LogOut,
   MessageSquare,
   Minimize2,
   PanelLeft,
   RefreshCw,
-  RotateCcw,
   Search,
+  Settings,
   User,
-  Users,
 } from "lucide-react";
 import {
   buildAgentContextMarkdown,
@@ -38,20 +36,20 @@ import {
   type PublicUser,
   type Space,
 } from "@/lib/workspace";
-import { AgentMcpModal } from "./AgentMcpModal";
 import { AuthScreen } from "./AuthScreen";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { CommentsPanel } from "./CommentsPanel";
+import { ConfirmDeleteModal } from "./ConfirmDeleteModal";
 import { FrontmatterBar } from "./FrontmatterBar";
 import { KansoEmbedsPanel } from "./KansoEmbedsPanel";
+import { PdfAttachmentsPanel } from "./PdfAttachmentsPanel";
 import {
   RichDocumentEditor,
   type RichDocumentEditorHandle,
 } from "./RichDocumentEditor";
 import { SearchModal } from "./SearchModal";
 import { SpaceSidebar } from "./SpaceSidebar";
-import { TeamAccessModal } from "./TeamAccessModal";
 
 const STORAGE_WORKSPACE_KEY = "brief:workspace:v2";
 
@@ -73,8 +71,9 @@ export function BriefEditor() {
   const [focusMode, setFocusMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: "doc"; docId: string } | { kind: "space"; spaceId: string } | null
+  >(null);
   const [copiedAgentContext, setCopiedAgentContext] = useState(false);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -354,6 +353,32 @@ export function BriefEditor() {
     [activeDocId, currentUser?.role]
   );
 
+  const requestDeleteDoc = useCallback(
+    (docId: string) => {
+      if (currentUser?.role === "viewer" || documents.length <= 1) return;
+      setPendingDelete({ kind: "doc", docId });
+    },
+    [currentUser?.role, documents.length]
+  );
+
+  const requestDeleteSpace = useCallback(
+    (spaceId: string) => {
+      if (currentUser?.role === "viewer" || spaces.length <= 1) return;
+      setPendingDelete({ kind: "space", spaceId });
+    },
+    [currentUser?.role, spaces.length]
+  );
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    if (pendingDelete.kind === "doc") {
+      handleDeleteDoc(pendingDelete.docId);
+    } else {
+      handleDeleteSpace(pendingDelete.spaceId);
+    }
+    setPendingDelete(null);
+  }, [pendingDelete, handleDeleteDoc, handleDeleteSpace]);
+
   const handleOpenOrCreateWikiLink = useCallback(
     (targetTitle: string) => {
       const normalized = targetTitle.trim().toLowerCase();
@@ -528,9 +553,11 @@ export function BriefEditor() {
       {
         id: "agent-mcp-settings",
         group: "Document",
-        label: "Agent API & MCP Settings",
-        description: "Manage API tokens and MCP configuration for AI agents",
-        onRun: () => setMcpModalOpen(true),
+        label: "Einstellungen & API / MCP",
+        description: "Team, API Tokens, MCP und Workspace-Einstellungen öffnen",
+        onRun: () => {
+          window.location.assign("/einstellung");
+        },
       },
       {
         id: "doc-reset",
@@ -558,43 +585,100 @@ export function BriefEditor() {
     title,
   ]);
 
+  const applyDraftApprovals = useCallback(
+    (
+      prev: BriefDocument[],
+      draftIds: Set<string>,
+      now: string
+    ): { next: BriefDocument[]; redirectActiveId?: string } => {
+      const removedDraftIds = new Set<string>();
+      const contentUpdates = new Map<string, string>();
+      let redirectActiveId: string | undefined;
+
+      for (const doc of prev) {
+        if (!draftIds.has(doc.id)) continue;
+        if (
+          doc.proposalTargetId &&
+          prev.some((target) => target.id === doc.proposalTargetId)
+        ) {
+          removedDraftIds.add(doc.id);
+          contentUpdates.set(doc.proposalTargetId, doc.content);
+          if (doc.id === activeDocId) {
+            redirectActiveId = doc.proposalTargetId;
+          }
+        }
+      }
+
+      const next = prev
+        .filter((d) => !removedDraftIds.has(d.id))
+        .map((d) => {
+          const updatedContent = contentUpdates.get(d.id);
+          if (updatedContent !== undefined) {
+            return { ...d, content: updatedContent, updatedAt: now };
+          }
+          if (draftIds.has(d.id)) {
+            return {
+              ...d,
+              status: "approved" as const,
+              proposedBy: undefined,
+              proposalTargetId: undefined,
+              proposalSummary: undefined,
+              updatedAt: now,
+            };
+          }
+          return d;
+        });
+
+      return { next, redirectActiveId };
+    },
+    [activeDocId]
+  );
+
   const handleApproveDraft = useCallback(
     (draft: BriefDocument) => {
       const now = new Date().toISOString();
-      if (
-        draft.proposalTargetId &&
-        documents.some((d) => d.id === draft.proposalTargetId)
-      ) {
-        const targetId = draft.proposalTargetId;
-        setDocuments((prev) =>
-          prev
-            .filter((d) => d.id !== draft.id)
-            .map((d) =>
-              d.id === targetId
-                ? { ...d, content: draft.content, updatedAt: now }
-                : d
-            )
+      setDocuments((prev) => {
+        const { next, redirectActiveId } = applyDraftApprovals(
+          prev,
+          new Set([draft.id]),
+          now
         );
-        setActiveDocId(targetId);
-        return;
-      }
-
-      setDocuments((prev) =>
-        prev.map((d) =>
-          d.id === draft.id
-            ? {
-                ...d,
-                status: "approved",
-                proposedBy: undefined,
-                proposalTargetId: undefined,
-                proposalSummary: undefined,
-                updatedAt: now,
-              }
-            : d
-        )
-      );
+        if (redirectActiveId) {
+          setActiveDocId(redirectActiveId);
+        }
+        return next;
+      });
     },
-    [documents]
+    [applyDraftApprovals]
+  );
+
+  const handlePublishAllDrafts = useCallback(
+    (spaceId: string) => {
+      if (currentUser?.role === "viewer") return;
+      const now = new Date().toISOString();
+      setDocuments((prev) => {
+        const draftIds = new Set(
+          prev
+            .filter(
+              (d) =>
+                d.spaceId === spaceId &&
+                normalizeDocumentStatus(d.status) === "draft"
+            )
+            .map((d) => d.id)
+        );
+        if (draftIds.size === 0) return prev;
+        const { next, redirectActiveId } = applyDraftApprovals(
+          prev,
+          draftIds,
+          now
+        );
+        if (redirectActiveId) {
+          setActiveDocId(redirectActiveId);
+        }
+        return next;
+      });
+    },
+    [applyDraftApprovals, currentUser?.role]
   );
 
   const handleAddInlineComment = useCallback(
@@ -827,31 +911,6 @@ export function BriefEditor() {
 
               <button
                 type="button"
-                onClick={() => {
-                  if (activeDoc) handleCreateDoc(activeDoc.spaceId, activeDoc.id);
-                }}
-                className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 sm:inline-flex"
-                title="Create nested child page"
-              >
-                <FilePlus2 className="h-3.5 w-3.5" />
-                <span className="hidden lg:inline">Child Page</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setPaletteOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                title="Command Palette (Cmd+K)"
-              >
-                <Command className="h-3.5 w-3.5" />
-                <span className="hidden md:inline">Commands</span>
-                <kbd className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[10px] text-zinc-500">
-                  ⌘K
-                </kbd>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleCopyAgentContext}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
                 title="Copy page + nested & [[linked]] docs as Agent Context"
@@ -869,17 +928,14 @@ export function BriefEditor() {
                 )}
               </button>
 
-              {currentUser?.role === "admin" && (
-                <button
-                  type="button"
-                  onClick={() => setTeamModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
-                  title="Team, Rollen & Space-Zugriff"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  <span className="hidden xl:inline">Team &amp; Rechte</span>
-                </button>
-              )}
+              <Link
+                href="/einstellung"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                title="Einstellungen, Team, API Tokens & Backups"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Einstellungen</span>
+              </Link>
 
               {currentUser && (
                 <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-700">
@@ -930,12 +986,12 @@ export function BriefEditor() {
             onCreateDoc={(spaceId, parentId) =>
               handleCreateDoc(spaceId, parentId ?? null)
             }
-            onDeleteDoc={handleDeleteDoc}
+            onDeleteDoc={requestDeleteDoc}
             onCreateSpace={handleCreateSpace}
-            onDeleteSpace={handleDeleteSpace}
+            onDeleteSpace={requestDeleteSpace}
             canDeleteSpace={currentUser?.role !== "viewer"}
+            onPublishAllDrafts={handlePublishAllDrafts}
             onCopySpaceContext={handleCopySpaceContext}
-            onOpenAgentMcp={() => setMcpModalOpen(true)}
           />
         )}
 
@@ -969,7 +1025,7 @@ export function BriefEditor() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDeleteDoc(activeDoc.id)}
+                    onClick={() => requestDeleteDoc(activeDoc.id)}
                     className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100/60"
                   >
                     Discard Draft
@@ -1063,18 +1119,6 @@ export function BriefEditor() {
                     {activeDoc?.lastEditedBy || activeDoc?.proposedBy}
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSpaces(DEFAULT_SPACES);
-                    setDocuments(DEFAULT_DOCUMENTS);
-                    setActiveDocId(DEFAULT_DOCUMENTS[0].id);
-                  }}
-                  className="shrink-0 rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-                  title="Reset demo workspace"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
               </div>
             </div>
 
@@ -1109,6 +1153,18 @@ export function BriefEditor() {
             />
 
             <KansoEmbedsPanel content={content} />
+
+            {activeDoc && (
+              <PdfAttachmentsPanel
+                docId={activeDoc.id}
+                readOnly={isViewer}
+                onInsertReference={(att) =>
+                  richEditorRef.current?.insertMarkdownSnippet(
+                    `[📄 ${att.originalName}](${att.url}) `
+                  )
+                }
+              />
+            )}
 
             <CommentsPanel
               comments={activeDoc?.comments ?? []}
@@ -1188,21 +1244,49 @@ export function BriefEditor() {
         onClose={() => setSearchOpen(false)}
         onSelectDoc={setActiveDocId}
       />
-
-      <AgentMcpModal
-        open={mcpModalOpen}
-        onClose={() => setMcpModalOpen(false)}
-      />
-
-      {currentUser && (
-        <TeamAccessModal
-          open={teamModalOpen}
-          currentUser={currentUser}
-          spaces={spaces}
-          onClose={() => setTeamModalOpen(false)}
-          onUserUpdated={(updated) => setCurrentUser(updated)}
-        />
-      )}
+      {(() => {
+        if (!pendingDelete) return null;
+        if (pendingDelete.kind === "doc") {
+          const doc = documents.find((d) => d.id === pendingDelete.docId);
+          const stageLabel =
+            SPEC_STATUS_META[normalizeDocumentStatus(doc?.status)].label;
+          const childCount = documents.filter(
+            (d) => d.parentId === pendingDelete.docId
+          ).length;
+          return (
+            <ConfirmDeleteModal
+              open
+              title={`Seite "${doc?.title || "Unbenannt"}" löschen?`}
+              description={`Diese Seite (Status: ${stageLabel}) wird dauerhaft entfernt.${
+                childCount > 0
+                  ? ` ${childCount} untergeordnete Seite(n) werden eine Ebene nach oben verschoben.`
+                  : ""
+              }`}
+              confirmLabel="Seite löschen"
+              onCancel={() => setPendingDelete(null)}
+              onConfirm={handleConfirmDelete}
+            />
+          );
+        }
+        const space = spaces.find((s) => s.id === pendingDelete.spaceId);
+        const spaceDocCount = documents.filter(
+          (d) => d.spaceId === pendingDelete.spaceId
+        ).length;
+        return (
+          <ConfirmDeleteModal
+            open
+            title={`Space "${space?.name || "Unbenannt"}" löschen?`}
+            description={
+              spaceDocCount > 0
+                ? `Der Space und alle ${spaceDocCount} enthaltenen Seiten (unabhängig vom Status) werden dauerhaft gelöscht.`
+                : "Dieser leere Space wird dauerhaft entfernt."
+            }
+            confirmLabel="Space löschen"
+            onCancel={() => setPendingDelete(null)}
+            onConfirm={handleConfirmDelete}
+          />
+        );
+      })()}
     </div>
   );
 }
